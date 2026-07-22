@@ -234,9 +234,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $visitStmt = $conn->prepare($visitQuery);
             $visitStmt->bind_param('ii', $bedId, $visitId);
             $visitStmt->execute();
+
+            $bedCharge = $conn->prepare("SELECT b.price_per_day, bt.base_price, w.name, b.bed_number
+                                         FROM beds b
+                                         JOIN wards w ON b.ward_id = w.ward_id
+                                         LEFT JOIN lookup_bed_types bt ON b.bed_type_id = bt.bed_type_id
+                                         WHERE b.bed_id = ?");
+            $bedCharge->bind_param('i', $bedId);
+            $bedCharge->execute();
+            $bedDetails = $bedCharge->get_result()->fetch_assoc();
+            $bedPrice = (float) ($bedDetails['price_per_day'] ?: $bedDetails['base_price']);
+            addInvoiceCharge($conn, $visitId, 'IPD bed: ' . $bedDetails['name'] . ' / Bed ' . $bedDetails['bed_number'], 'Bed', 1, $bedPrice);
+
+            $ipdTypeId = getLookupId($conn, 'lookup_visit_types', 'name', 'IPD');
+            $ipdDepartmentId = getLookupId($conn, 'lookup_departments', 'code', 'IPD');
+            $typeStmt = $conn->prepare("UPDATE visits SET visit_type_id = ?, department_id = ? WHERE visit_id = ?");
+            $typeStmt->bind_param('iii', $ipdTypeId, $ipdDepartmentId, $visitId);
+            $typeStmt->execute();
             
             $conn->commit();
             
+            $clearBedFlag = $conn->prepare("UPDATE medical_records SET needs_bed = 0 WHERE visit_id = ?");
+            $clearBedFlag->bind_param('i', $visitId);
+            $clearBedFlag->execute();
+
             logUserActivity($conn, $_SESSION['user_id'], 'Assigned Bed', "Assigned bed ID: {$bedId} to patient ID: {$patientId}");
             $message = 'Patient assigned to bed successfully!';
             header('Location: bed_management.php?tab=assignments&message=' . urlencode($message));
@@ -370,13 +391,21 @@ $assignments = $assignResult->fetch_all(MYSQLI_ASSOC);
 $unassignedVisits = [];
 $unassignedQuery = "SELECT v.visit_id, v.visit_code, 
                            CONCAT(p.first_name, ' ', p.last_name) as patient_name,
-                           p.patient_id, p.patient_code
-                    FROM visits v
+                           p.patient_id, p.patient_code,
+                           mr.diagnosis,
+                           CONCAT(d.first_name, ' ', d.last_name) as doctor_name
+                    FROM medical_records mr
+                    JOIN visits v ON mr.visit_id = v.visit_id
                     JOIN patients p ON v.patient_id = p.patient_id
-                    WHERE v.visit_type_id = (SELECT visit_type_id FROM lookup_visit_types WHERE name = 'IPD')
+                    JOIN staff d ON mr.doctor_id = d.staff_id
+                    WHERE mr.needs_bed = 1
                     AND v.visit_status_id NOT IN (SELECT visit_status_id FROM lookup_visit_statuses WHERE name IN ('Discharged', 'Cancelled'))
                     AND v.ward_bed IS NULL
-                    ORDER BY v.admitted_at DESC";
+                    AND NOT EXISTS (
+                        SELECT 1 FROM bed_assignments ba
+                        WHERE ba.visit_id = v.visit_id AND ba.discharged_at IS NULL
+                    )
+                    ORDER BY mr.created_at DESC";
 $unassignedResult = $conn->query($unassignedQuery);
 $unassignedVisits = $unassignedResult->fetch_all(MYSQLI_ASSOC);
 
@@ -965,7 +994,7 @@ if (isset($_GET['message'])) {
                 <?php if (!empty($unassignedVisits)): ?>
                 <div class="alert alert-warning" style="background: #fef3c7; color: #d97706; border-color: #fde68a; margin-top: 20px;">
                     <i class="fas fa-exclamation-triangle"></i>
-                    <strong><?php echo count($unassignedVisits); ?> IPD patients need bed assignment!</strong>
+                    <strong><?php echo count($unassignedVisits); ?> patients referred for bed assignment!</strong>
                                     <a href="bed_management.php?action=assign_bed" style="color: #d97706; font-weight: 600; text-decoration: underline;">Assign beds now</a>
                 </div>
                 <?php endif; ?>
@@ -1162,6 +1191,12 @@ if (isset($_GET['message'])) {
                                         <td><?php echo date('M d, Y g:i A', strtotime($assignment['assigned_at'])); ?></td>
                                         <td>
                                             <div class="action-buttons">
+                                                <a href="lab.php?action=create&visit_id=<?php echo $assignment['visit_id']; ?>" class="btn-edit">
+                                                    <i class="fas fa-flask"></i> Lab
+                                                </a>
+                                                <a href="pharmacy.php?action=create_prescription&visit_id=<?php echo $assignment['visit_id']; ?>" class="btn-edit">
+                                                    <i class="fas fa-pills"></i> Medicine
+                                                </a>
                                                 <a href="bed_management.php?action=discharge&id=<?php echo $assignment['assignment_id']; ?>" class="btn-discharge" onclick="return confirm('Are you sure you want to discharge this patient from the bed?');">
                                                     <i class="fas fa-sign-out-alt"></i> Discharge
                                                 </a>
@@ -1443,6 +1478,12 @@ if (isset($_GET['message'])) {
                 
                 <div class="form-group">
                     <label for="visit_id">Select IPD Visit *</label>
+                    <?php if ($selectedVisitId > 0): ?>
+                        <?php foreach ($unassignedVisits as $visit): if ((int) $visit['visit_id'] === $selectedVisitId): ?>
+                            <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
+                            <input type="text" value="<?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['patient_name'] . ' (' . $visit['patient_code'] . ')'); ?>" readonly>
+                        <?php endif; endforeach; ?>
+                    <?php else: ?>
                     <select id="visit_id" name="visit_id" required>
                         <option value="">Select Visit</option>
                         <?php foreach ($unassignedVisits as $visit): ?>
@@ -1451,6 +1492,7 @@ if (isset($_GET['message'])) {
                             </option>
                         <?php endforeach; ?>
                     </select>
+                    <?php endif; ?>
                     <?php if (empty($unassignedVisits)): ?>
                         <small style="color: #22c55e;">All IPD patients have beds assigned!</small>
                     <?php endif; ?>

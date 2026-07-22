@@ -490,6 +490,8 @@ CREATE TABLE `medical_records` (
   `doctor_id` int(10) UNSIGNED NOT NULL,
   `diagnosis` varchar(255) DEFAULT NULL,
   `clinical_notes` text DEFAULT NULL,
+  `needs_lab` tinyint(1) NOT NULL DEFAULT 0,
+  `needs_bed` tinyint(1) NOT NULL DEFAULT 0,
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   `updated_at` datetime DEFAULT NULL ON UPDATE current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

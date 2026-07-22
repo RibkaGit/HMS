@@ -808,6 +808,47 @@ function createAppointment($conn, $data) {
     return false;
 }
 
+/**
+ * Queue an SMS notification for an appointment.
+ * A provider worker can send pending rows from sms_notifications.
+ */
+function queueAppointmentSms($conn, $appointmentId) {
+    $query = "SELECT a.scheduled_at, a.status, p.phone, p.first_name, p.last_name,
+                     CONCAT(s.first_name, ' ', s.last_name) as doctor_name,
+                     d.name as department
+              FROM appointments a
+              JOIN patients p ON a.patient_id = p.patient_id
+              LEFT JOIN staff s ON a.doctor_id = s.staff_id
+              JOIN lookup_departments d ON a.department_id = d.department_id
+              WHERE a.appointment_id = ?";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param('i', $appointmentId);
+    $stmt->execute();
+    $appointment = $stmt->get_result()->fetch_assoc();
+
+    if (!$appointment || trim((string) $appointment['phone']) === '') {
+        return false;
+    }
+
+    $message = sprintf(
+        'HMS appointment for %s %s: %s at %s with %s in %s. Status: %s.',
+        $appointment['first_name'],
+        $appointment['last_name'],
+        date('M j, Y', strtotime($appointment['scheduled_at'])),
+        date('g:i A', strtotime($appointment['scheduled_at'])),
+        $appointment['doctor_name'] ?: 'the hospital team',
+        $appointment['department'],
+        $appointment['status']
+    );
+
+    $insert = $conn->prepare("INSERT INTO sms_notifications
+        (appointment_id, patient_id, phone_number, message, status)
+        SELECT appointment_id, patient_id, ?, ?, 'Pending'
+        FROM appointments WHERE appointment_id = ?");
+    $insert->bind_param('ssi', $appointment['phone'], $message, $appointmentId);
+    return $insert->execute();
+}
+
 // ============================================================================
 // BILLING FUNCTIONS
 // ============================================================================
@@ -827,6 +868,8 @@ function createInvoice($conn, $visitId) {
     
     $invoiceCode = generateInvoiceCode($conn);
     $statusId = getLookupId($conn, 'lookup_invoice_statuses', 'name', 'Unpaid');
+    $subtotal = 0.00;
+    $total = 0.00;
     
     $query = "INSERT INTO invoices (invoice_code, visit_id, patient_id, 
               invoice_status_id, subtotal, total) 
@@ -837,8 +880,8 @@ function createInvoice($conn, $visitId) {
         $visitId,
         $visit['patient_id'],
         $statusId,
-        0.00,
-        0.00
+        $subtotal,
+        $total
     );
     
     if ($stmt->execute()) {
@@ -860,6 +903,58 @@ function getInvoiceByVisit($conn, $visitId) {
     $stmt->bind_param('i', $visitId);
     $stmt->execute();
     return $stmt->get_result()->fetch_assoc();
+}
+
+function addInvoiceCharge($conn, $visitId, $description, $itemType, $quantity, $unitPrice) {
+    $invoice = getInvoiceByVisit($conn, $visitId);
+    if (!$invoice) {
+        $invoiceId = createInvoice($conn, $visitId);
+        if (!$invoiceId) {
+            return false;
+        }
+    } else {
+        $invoiceId = (int) $invoice['invoice_id'];
+    }
+
+    $check = $conn->prepare("SELECT invoice_item_id FROM invoice_items WHERE invoice_id = ? AND description = ? LIMIT 1");
+    $check->bind_param('is', $invoiceId, $description);
+    $check->execute();
+    if ($check->get_result()->fetch_assoc()) {
+        return $invoiceId;
+    }
+
+    $lineTotal = (float) $quantity * (float) $unitPrice;
+    $item = $conn->prepare("INSERT INTO invoice_items (invoice_id, description, item_type, quantity, unit_price, line_total) VALUES (?, ?, ?, ?, ?, ?)");
+    $item->bind_param('issidd', $invoiceId, $description, $itemType, $quantity, $unitPrice, $lineTotal);
+    if (!$item->execute()) {
+        return false;
+    }
+
+    $update = $conn->prepare("UPDATE invoices SET subtotal = (SELECT COALESCE(SUM(line_total), 0) FROM invoice_items WHERE invoice_id = ?), total = (SELECT COALESCE(SUM(line_total), 0) FROM invoice_items WHERE invoice_id = ?) WHERE invoice_id = ?");
+    $update->bind_param('iii', $invoiceId, $invoiceId, $invoiceId);
+    if (!$update->execute()) {
+        return false;
+    }
+
+    $unpaidStatusId = getLookupId($conn, 'lookup_invoice_statuses', 'name', 'Unpaid');
+    $status = $conn->prepare("UPDATE invoices SET invoice_status_id = ? WHERE invoice_id = ? AND total > (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE invoice_id = ?)");
+    $status->bind_param('iii', $unpaidStatusId, $invoiceId, $invoiceId);
+    $status->execute();
+    return $invoiceId;
+}
+
+function isVisitPaid($conn, $visitId) {
+    $query = "SELECT i.total, COALESCE(SUM(p.amount), 0) as paid_amount
+              FROM invoices i
+              LEFT JOIN payments p ON p.invoice_id = i.invoice_id
+              WHERE i.visit_id = ?
+              GROUP BY i.invoice_id, i.total
+              ORDER BY i.invoice_id DESC LIMIT 1";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param('i', $visitId);
+    $stmt->execute();
+    $invoice = $stmt->get_result()->fetch_assoc();
+    return $invoice && (float) $invoice['paid_amount'] >= (float) $invoice['total'];
 }
 
 // ============================================================================
@@ -974,5 +1069,83 @@ function getMedicationsByPrescription($conn, $prescriptionId) {
     $stmt->bind_param('i', $prescriptionId);
     $stmt->execute();
     return $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+}
+
+function getPatientHistory($conn, $patientId) {
+    $patientId = intval($patientId);
+    $patient = getPatientById($conn, $patientId);
+    if (!$patient) {
+        return null;
+    }
+
+    $visits = getPatientVisits($conn, $patientId);
+
+    $recordsQuery = "SELECT mr.*, CONCAT(d.first_name, ' ', d.last_name) as doctor_name, v.visit_code
+                     FROM medical_records mr
+                     JOIN staff d ON mr.doctor_id = d.staff_id
+                     LEFT JOIN visits v ON mr.visit_id = v.visit_id
+                     WHERE mr.patient_id = ?
+                     ORDER BY mr.created_at DESC";
+    $recordsStmt = $conn->prepare($recordsQuery);
+    $recordsStmt->bind_param('i', $patientId);
+    $recordsStmt->execute();
+    $medicalRecords = $recordsStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+    $labQuery = "SELECT lo.*, vt.name as test_name, os.name as status_name, v.visit_code
+                 FROM lab_orders lo
+                 JOIN lookup_test_types vt ON lo.test_type_id = vt.test_type_id
+                 JOIN lookup_order_statuses os ON lo.order_status_id = os.order_status_id
+                 JOIN visits v ON lo.visit_id = v.visit_id
+                 WHERE v.patient_id = ?
+                 ORDER BY lo.ordered_at DESC";
+    $labStmt = $conn->prepare($labQuery);
+    $labStmt->bind_param('i', $patientId);
+    $labStmt->execute();
+    $labOrders = $labStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+    $vitalsQuery = "SELECT vs.*, v.visit_code, CONCAT(s.first_name, ' ', s.last_name) as recorded_by_name
+                    FROM vital_signs vs
+                    JOIN visits v ON vs.visit_id = v.visit_id
+                    LEFT JOIN staff s ON vs.recorded_by = s.staff_id
+                    WHERE v.patient_id = ?
+                    ORDER BY vs.recorded_at DESC
+                    LIMIT 20";
+    $vitalsStmt = $conn->prepare($vitalsQuery);
+    $vitalsStmt->bind_param('i', $patientId);
+    $vitalsStmt->execute();
+    $vitalSigns = $vitalsStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+    $rxQuery = "SELECT pr.*, v.visit_code, CONCAT(d.first_name, ' ', d.last_name) as doctor_name
+                FROM prescriptions pr
+                JOIN visits v ON pr.visit_id = v.visit_id
+                JOIN staff d ON pr.prescribed_by = d.staff_id
+                WHERE v.patient_id = ?
+                ORDER BY pr.prescribed_at DESC";
+    $rxStmt = $conn->prepare($rxQuery);
+    $rxStmt->bind_param('i', $patientId);
+    $rxStmt->execute();
+    $prescriptions = $rxStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+    $bedQuery = "SELECT ba.*, b.bed_number, w.name as ward_name, v.visit_code
+                 FROM bed_assignments ba
+                 JOIN beds b ON ba.bed_id = b.bed_id
+                 JOIN wards w ON b.ward_id = w.ward_id
+                 JOIN visits v ON ba.visit_id = v.visit_id
+                 WHERE ba.patient_id = ?
+                 ORDER BY ba.assigned_at DESC";
+    $bedStmt = $conn->prepare($bedQuery);
+    $bedStmt->bind_param('i', $patientId);
+    $bedStmt->execute();
+    $bedAssignments = $bedStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+    return [
+        'patient' => $patient,
+        'visits' => $visits,
+        'medical_records' => $medicalRecords,
+        'lab_orders' => $labOrders,
+        'vital_signs' => $vitalSigns,
+        'prescriptions' => $prescriptions,
+        'bed_assignments' => $bedAssignments,
+    ];
 }
 ?>

@@ -57,8 +57,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         }
     }
     if ($createdCount > 0) {
+        $chargeQuery = $conn->prepare("SELECT name, price FROM lookup_test_types WHERE test_type_id = ?");
+        foreach ($testTypeIds as $testTypeId) {
+            $chargeQuery->bind_param('i', $testTypeId);
+            $chargeQuery->execute();
+            $test = $chargeQuery->get_result()->fetch_assoc();
+            if ($test) {
+                addInvoiceCharge($conn, $visitId, 'Lab: ' . $test['name'], 'Test', 1, (float) $test['price'] > 0 ? (float) $test['price'] : 25.00);
+            }
+        }
         updateVisitStatus($conn, $visitId, 'Awaiting Results');
+        $clearLabFlag = $conn->prepare("UPDATE medical_records SET needs_lab = 0 WHERE visit_id = ?");
+        $clearLabFlag->bind_param('i', $visitId);
+        $clearLabFlag->execute();
         logUserActivity($conn, $_SESSION['user_id'], 'Created Lab Orders', "Created {$createdCount} lab order(s) for visit ID: {$visitId}");
+        if (isset($_POST['next']) && $_POST['next'] === 'bed') {
+            header('Location: bed_management.php?action=assign_bed&visit_id=' . $visitId);
+            exit();
+        }
         $message = 'Lab order created successfully!';
         header('Location: lab.php?message=' . urlencode($message));
         exit();
@@ -163,6 +179,20 @@ if (!empty($params)) {
 }
 $stmt->execute();
 $labOrders = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+// Patients referred from medical records (needs lab)
+$pendingLabQuery = "SELECT mr.record_id, mr.visit_id, mr.diagnosis, mr.created_at,
+                           CONCAT(p.first_name, ' ', p.last_name) as patient_name,
+                           p.patient_code,
+                           v.visit_code,
+                           CONCAT(d.first_name, ' ', d.last_name) as doctor_name
+                    FROM medical_records mr
+                    JOIN patients p ON mr.patient_id = p.patient_id
+                    JOIN visits v ON mr.visit_id = v.visit_id
+                    JOIN staff d ON mr.doctor_id = d.staff_id
+                    WHERE mr.needs_lab = 1
+                    ORDER BY mr.created_at DESC";
+$pendingLabPatients = $conn->query($pendingLabQuery)->fetch_all(MYSQLI_ASSOC);
 
 if (isset($_GET['message'])) {
     $message = urldecode($_GET['message']);
@@ -416,6 +446,59 @@ if (!empty($labOrders)) {
             font-weight: 600;
             color: #475569;
         }
+        .pending-lab-card {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 24px;
+        }
+        .pending-lab-card h3 {
+            margin: 0 0 12px;
+            font-size: 15px;
+            color: #1d4ed8;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .pending-lab-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .pending-lab-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            background: #fff;
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 1px solid #dbeafe;
+            flex-wrap: wrap;
+        }
+        .pending-lab-item-info strong {
+            display: block;
+            color: #0f172a;
+            font-size: 14px;
+        }
+        .pending-lab-item-info small {
+            color: #64748b;
+            font-size: 12px;
+        }
+        .btn-order-lab {
+            padding: 6px 14px;
+            background: #2563eb;
+            color: #fff;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+        .btn-order-lab:hover {
+            background: #1d4ed8;
+        }
     </style>
 </head>
 <body>
@@ -466,6 +549,29 @@ if (!empty($labOrders)) {
                     <i class="fas fa-plus"></i> New Lab Order
                 </button>
             </div>
+
+            <?php if (!empty($pendingLabPatients)): ?>
+            <div class="pending-lab-card">
+                <h3><i class="fas fa-user-clock"></i> Patients Referred for Lab (<?php echo count($pendingLabPatients); ?>)</h3>
+                <div class="pending-lab-list">
+                    <?php foreach ($pendingLabPatients as $pending): ?>
+                    <div class="pending-lab-item">
+                        <div class="pending-lab-item-info">
+                            <strong><?php echo htmlspecialchars($pending['patient_name']); ?> (<?php echo htmlspecialchars($pending['patient_code']); ?>)</strong>
+                            <small>
+                                Visit: <?php echo htmlspecialchars($pending['visit_code']); ?>
+                                · Dr. <?php echo htmlspecialchars($pending['doctor_name']); ?>
+                                <?php if ($pending['diagnosis']): ?> · <?php echo htmlspecialchars($pending['diagnosis']); ?><?php endif; ?>
+                            </small>
+                        </div>
+                        <a href="lab.php?action=create&visit_id=<?php echo $pending['visit_id']; ?>" class="btn-order-lab">
+                            <i class="fas fa-flask"></i> Create Lab Order
+                        </a>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+            <?php endif; ?>
 
             <!-- Status Filter Tabs -->
             <div class="filter-tabs">
@@ -580,9 +686,18 @@ if (!empty($labOrders)) {
             
             <form method="POST" action="">
                 <input type="hidden" name="action" value="create">
+                <?php if (isset($_GET['next']) && $_GET['next'] === 'bed'): ?>
+                    <input type="hidden" name="next" value="bed">
+                <?php endif; ?>
                 
                 <div class="form-group">
                     <label for="visit_id">Visit *</label>
+                    <?php if ($selectedVisitId > 0): ?>
+                        <?php foreach ($visits as $visit): if ((int) $visit['visit_id'] === $selectedVisitId): ?>
+                            <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
+                            <input type="text" value="<?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['first_name'] . ' ' . $visit['last_name']); ?>" readonly>
+                        <?php endif; endforeach; ?>
+                    <?php else: ?>
                     <select id="visit_id" name="visit_id" required>
                         <option value="">Select Visit</option>
                         <?php foreach ($visits as $visit): ?>
@@ -591,6 +706,7 @@ if (!empty($labOrders)) {
                             </option>
                         <?php endforeach; ?>
                     </select>
+                    <?php endif; ?>
                 </div>
                 
                 <div class="form-group">

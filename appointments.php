@@ -43,6 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     
     $result = createAppointment($conn, $data);
     if ($result) {
+        queueAppointmentSms($conn, $result);
         logUserActivity($conn, $_SESSION['user_id'], 'Created Appointment', "Created appointment for patient ID: {$data['patient_id']}");
         $message = 'Appointment created successfully!';
         header('Location: appointments.php?message=' . urlencode($message));
@@ -77,6 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     );
     
     if ($stmt->execute()) {
+        queueAppointmentSms($conn, $appointmentId);
         logUserActivity($conn, $_SESSION['user_id'], 'Updated Appointment', "Updated appointment ID: {$appointmentId}");
         $message = 'Appointment updated successfully!';
         header('Location: appointments.php?message=' . urlencode($message));

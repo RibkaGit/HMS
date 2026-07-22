@@ -119,7 +119,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     'duration_days' => !empty($durations[$i]) ? intval($durations[$i]) : null,
                     'quantity' => intval($quantities[$i] ?? 1)
                 ];
-                addPrescriptionItem($conn, $itemData);
+                if (addPrescriptionItem($conn, $itemData)) {
+                    $priceStmt = $conn->prepare("SELECT name, strength, unit_price FROM medications WHERE medication_id = ?");
+                    $priceStmt->bind_param('i', $itemData['medication_id']);
+                    $priceStmt->execute();
+                    $medication = $priceStmt->get_result()->fetch_assoc();
+                    if ($medication) {
+                        addInvoiceCharge($conn, $data['visit_id'], 'Medication: ' . $medication['name'] . ' ' . $medication['strength'], 'Medication', $itemData['quantity'], (float) $medication['unit_price']);
+                    }
+                }
             }
         }
         
@@ -968,6 +976,12 @@ $lowStock = $conn->query("SELECT * FROM medications WHERE stock_quantity <= reor
                 <div class="form-row">
                     <div class="form-group">
                         <label for="visit_id">Visit *</label>
+                        <?php if ($selectedVisitId > 0): ?>
+                            <?php foreach ($visits as $visit): if ((int) $visit['visit_id'] === $selectedVisitId): ?>
+                                <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
+                                <input type="text" value="<?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['first_name'] . ' ' . $visit['last_name']); ?>" readonly>
+                            <?php endif; endforeach; ?>
+                        <?php else: ?>
                         <select id="visit_id" name="visit_id" required>
                             <option value="">Select Visit</option>
                             <?php foreach ($visits as $visit): ?>
@@ -976,6 +990,7 @@ $lowStock = $conn->query("SELECT * FROM medications WHERE stock_quantity <= reor
                                 </option>
                             <?php endforeach; ?>
                         </select>
+                        <?php endif; ?>
                     </div>
                     <div class="form-group">
                         <label for="prescribed_by">Prescribing Doctor *</label>

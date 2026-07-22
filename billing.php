@@ -191,12 +191,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $updateStmt->execute();
 
             if ($newStatus === 'Paid') {
-                updateVisitStatus($conn, $invoice['visit_id'], 'Discharged');
+                updateVisitStatus($conn, $invoice['visit_id'], 'In Consultation');
             }
             
             logUserActivity($conn, $_SESSION['user_id'], 'Processed Payment', "Payment of \${$amount} for invoice ID: {$invoiceId}");
             $message = 'Payment processed successfully!';
-            header('Location: billing.php?message=' . urlencode($message));
+            $nextPage = $newStatus === 'Paid' ? 'visits.php' : 'billing.php';
+            header('Location: ' . $nextPage . '?message=' . urlencode($message));
             exit();
         } else {
             $error = 'Failed to process payment. Please try again.';

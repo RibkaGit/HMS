@@ -165,6 +165,19 @@ if (isset($_GET['action']) && $_GET['action'] === 'edit' && isset($_GET['id'])) 
 }
 
 $selectedPatientId = isset($_GET['patient_id']) ? intval($_GET['patient_id']) : 0;
+$selectedPatient = null;
+foreach ($patients as $patient) {
+    if ((int) $patient['patient_id'] === $selectedPatientId) {
+        $selectedPatient = $patient;
+        break;
+    }
+}
+
+$patientsWithoutVisits = $conn->query("SELECT p.patient_id, p.patient_code, p.first_name, p.last_name
+    FROM patients p
+    LEFT JOIN visits v ON v.patient_id = p.patient_id
+    WHERE p.is_active = 1 AND v.visit_id IS NULL
+    ORDER BY p.registered_at DESC")->fetch_all(MYSQLI_ASSOC);
 
 if (isset($_GET['message'])) {
     $message = urldecode($_GET['message']);
@@ -403,10 +416,29 @@ if (isset($_GET['message'])) {
                         <?php endif; ?>
                     </form>
                 </div>
-                <button class="btn-create" onclick="window.location.href='visits.php?action=create'">
-                    <i class="fas fa-plus"></i> New Visit
-                </button>
             </div>
+
+            <?php if (!empty($patientsWithoutVisits)): ?>
+            <div class="table-card" style="margin-bottom: 24px;">
+                <div style="padding: 16px 20px; border-bottom: 1px solid #e2e8f0;">
+                    <strong>Patients Needing Their First Visit</strong>
+                </div>
+                <div class="table-responsive">
+                    <table class="recent-table">
+                        <thead><tr><th>Patient</th><th>Registered</th><th>Action</th></tr></thead>
+                        <tbody>
+                        <?php foreach ($patientsWithoutVisits as $newPatient): ?>
+                            <tr>
+                                <td><?php echo htmlspecialchars($newPatient['patient_code'] . ' - ' . $newPatient['first_name'] . ' ' . $newPatient['last_name']); ?></td>
+                                <td>New patient</td>
+                                <td><a href="visits.php?action=create&patient_id=<?php echo $newPatient['patient_id']; ?>" class="btn-create-action"><i class="fas fa-calendar-plus"></i> Add Visit</a></td>
+                            </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <?php endif; ?>
 
             <div class="table-card">
                 <div class="table-responsive">
@@ -509,6 +541,10 @@ if (isset($_GET['message'])) {
                 <div class="form-row">
                     <div class="form-group">
                         <label for="patient_id">Patient *</label>
+                        <?php if (!$editVisit && $selectedPatient): ?>
+                            <input type="hidden" name="patient_id" value="<?php echo $selectedPatient['patient_id']; ?>">
+                            <input type="text" value="<?php echo htmlspecialchars($selectedPatient['patient_code'] . ' - ' . $selectedPatient['first_name'] . ' ' . $selectedPatient['last_name']); ?>" readonly>
+                        <?php else: ?>
                         <select id="patient_id" name="patient_id" required <?php echo $editVisit ? 'disabled' : ''; ?>>
                             <option value="">Select Patient</option>
                             <?php foreach ($patients as $patient): ?>
@@ -517,6 +553,7 @@ if (isset($_GET['message'])) {
                                 </option>
                             <?php endforeach; ?>
                         </select>
+                        <?php endif; ?>
                         <?php if ($editVisit): ?>
                             <input type="hidden" name="patient_id" value="<?php echo $editVisit['patient_id']; ?>">
                         <?php endif; ?>

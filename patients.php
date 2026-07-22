@@ -88,7 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
               primary_doctor_id) 
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     $stmt = $conn->prepare($query);
-    $stmt->bind_param('ssissssisssssssssssssssssisisissssssssssi',
+    $stmt->bind_param('ssisssssissssssssssssssssssssisssisssssssssi',
         $data['patient_code'],
         $data['uhid_date'],
         $data['new_born'],
@@ -137,10 +137,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     
     if ($stmt->execute()) {
         $patientId = $conn->insert_id;
+        $visitData = [
+            'visit_code' => generateVisitCode($conn),
+            'patient_id' => $patientId,
+            'visit_type_id' => getLookupId($conn, 'lookup_visit_types', 'name', 'OPD'),
+            'department_id' => getLookupId($conn, 'lookup_departments', 'code', 'OPD'),
+            'attending_doctor_id' => null,
+            'visit_status_id' => getLookupId($conn, 'lookup_visit_statuses', 'name', 'Registered'),
+            'notes' => 'Automatically created during patient registration'
+        ];
+        $visitId = createVisit($conn, $visitData);
+        if (!$visitId || !addInvoiceCharge($conn, $visitId, 'OPD registration and consultation', 'Consultation', 1, 50.00)) {
+            $error = 'Patient was created, but the automatic OPD visit or billing record could not be created.';
+        }
         logUserActivity($conn, $_SESSION['user_id'], 'Created Patient', "Created patient: {$data['first_name']} {$data['last_name']}");
-        $message = 'Patient created successfully!';
-        header('Location: patients.php?message=' . urlencode($message));
-        exit();
+        if (!$error) {
+            $message = 'Patient registered as OPD and added to billing successfully!';
+            header('Location: patients.php?message=' . urlencode($message));
+            exit();
+        }
     } else {
         $error = 'Failed to create patient. Please try again: ' . $stmt->error;
     }
@@ -210,7 +225,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
               primary_doctor_id = ?
               WHERE patient_id = ?";
     $stmt = $conn->prepare($query);
-    $stmt->bind_param('sissssisssssssssssssssssisisissssssssssiii',
+    $stmt->bind_param('sisssssissssssssssssssssssssisssisssssssssii',
         $data['uhid_date'],
         $data['new_born'],
         $data['title'],

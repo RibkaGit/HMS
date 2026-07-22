@@ -730,6 +730,12 @@ $stats = $statsResult->fetch_assoc();
                 <div class="form-row">
                     <div class="form-group">
                         <label for="visit_id">Visit *</label>
+                        <?php if ($selectedVisitId > 0): ?>
+                            <?php foreach ($visits as $visit): if ((int) $visit['visit_id'] === $selectedVisitId): ?>
+                                <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
+                                <input type="text" value="<?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['patient_name'] . ' (' . $visit['patient_code'] . ')'); ?>" readonly>
+                            <?php endif; endforeach; ?>
+                        <?php else: ?>
                         <select id="visit_id" name="visit_id" required>
                             <option value="">Select Visit</option>
                             <?php foreach ($visits as $visit): ?>
@@ -738,6 +744,7 @@ $stats = $statsResult->fetch_assoc();
                                 </option>
                             <?php endforeach; ?>
                         </select>
+                        <?php endif; ?>
                     </div>
                     <div class="form-group">
                         <label for="recorded_by">Recorded By</label>

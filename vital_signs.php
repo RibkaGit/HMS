@@ -21,13 +21,16 @@ $message = '';
 $error = '';
 $selectedVisitId = isset($_GET['visit_id']) ? intval($_GET['visit_id']) : 0;
 
-// Get all visits for dropdown
+// Get visits in arrival order so the nurse can work from the oldest waiting patient.
 $visits = $conn->query("SELECT v.visit_id, v.visit_code, 
                         CONCAT(p.first_name, ' ', p.last_name) as patient_name,
-                        p.patient_code
+                        p.patient_code, v.admitted_at,
+                        vs.name as visit_status
                         FROM visits v 
                         JOIN patients p ON v.patient_id = p.patient_id 
-                        ORDER BY v.admitted_at DESC LIMIT 200")->fetch_all(MYSQLI_ASSOC);
+                        JOIN lookup_visit_statuses vs ON v.visit_status_id = vs.visit_status_id
+                        WHERE vs.name NOT IN ('Cancelled', 'Discharged')
+                        ORDER BY v.admitted_at ASC LIMIT 200")->fetch_all(MYSQLI_ASSOC);
 
 // Get staff for dropdown (nurses and doctors)
 $staff = $conn->query("SELECT staff_id, first_name, last_name, 
@@ -53,9 +56,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
               blood_pressure, respiration_rate, spo2_percent, weight_kg, height_cm) 
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
     $stmt = $conn->prepare($query);
-    $stmt->bind_param('iiddddidd', 
-        $_POST['visit_id'],
-        $_POST['recorded_by'],
+    $visitId = intval($_POST['visit_id']);
+    $recordedBy = intval($_POST['recorded_by']);
+    $stmt->bind_param('iidisiidd', 
+        $visitId,
+        $recordedBy,
         $temperature,
         $pulse,
         $bloodPressure,
@@ -95,7 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
               respiration_rate = ?, spo2_percent = ?, weight_kg = ?, height_cm = ?
               WHERE vital_id = ?";
     $stmt = $conn->prepare($query);
-    $stmt->bind_param('ddddiddi', 
+    $stmt->bind_param('disiiddi', 
         $temperature,
         $pulse,
         $bloodPressure,
@@ -183,6 +188,19 @@ if (!empty($params)) {
 }
 $stmt->execute();
 $vitalSigns = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+$queueQuery = "SELECT v.visit_id, v.visit_code, v.admitted_at,
+               CONCAT(p.first_name, ' ', p.last_name) as patient_name,
+               p.patient_code, vs.name as visit_status
+               FROM visits v
+               JOIN patients p ON v.patient_id = p.patient_id
+               JOIN lookup_visit_statuses vs ON v.visit_status_id = vs.visit_status_id
+               LEFT JOIN vital_signs existing ON existing.visit_id = v.visit_id
+               WHERE existing.vital_id IS NULL
+               AND vs.name NOT IN ('Cancelled', 'Discharged')
+               ORDER BY v.admitted_at ASC
+               LIMIT 200";
+$vitalQueue = $conn->query($queueQuery)->fetch_all(MYSQLI_ASSOC);
 
 // Get vital sign for edit
 $editVital = null;
@@ -583,14 +601,6 @@ $stats = $statsResult->fetch_assoc();
                 <div class="search-box">
                     <form method="GET" action="" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
                         <input type="text" name="search" placeholder="Search vital signs..." value="<?php echo htmlspecialchars($searchTerm); ?>" style="width: 200px;">
-                        <select name="visit_id">
-                            <option value="0">All Visits</option>
-                            <?php foreach ($visits as $visit): ?>
-                                <option value="<?php echo $visit['visit_id']; ?>" <?php echo ($visitFilter == $visit['visit_id']) ? 'selected' : ''; ?>>
-                                    <?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['patient_name']); ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
                         <button type="submit" style="padding: 8px 16px; background: #2563eb; color: #fff; border: none; border-radius: 8px; cursor: pointer;">
                             <i class="fas fa-search"></i>
                         </button>
@@ -599,118 +609,70 @@ $stats = $statsResult->fetch_assoc();
                         <?php endif; ?>
                     </form>
                 </div>
-                <button class="btn-create" onclick="window.location.href='vital_signs.php?action=create_vital'">
-                    <i class="fas fa-plus"></i> Record Vital Signs
-                </button>
             </div>
 
-            <!-- Vital Signs List -->
-            <?php if (empty($vitalSigns)): ?>
-                <div style="text-align: center; color: #94a3b8; padding: 60px; background: #fff; border-radius: 12px; border: 1px solid #e2e8f0;">
-                    <i class="fas fa-heartbeat" style="font-size: 48px; display: block; margin-bottom: 16px; color: #e2e8f0;"></i>
-                    <h3 style="font-size: 18px; font-weight: 600; color: #475569; margin-bottom: 8px;">No Vital Signs Recorded</h3>
-                    <p>Start recording patient vital signs by clicking the "Record Vital Signs" button above.</p>
-                </div>
-            <?php else: ?>
-                <?php foreach ($vitalSigns as $vital): ?>
-                <div class="vital-card">
-                    <div class="vital-header">
-                        <div class="patient">
-                            <div class="avatar" style="background: <?php echo getUserColor($vital['patient_name']); ?>;">
-                                <?php echo strtoupper(substr($vital['patient_name'], 0, 1)); ?>
-                            </div>
-                            <div>
-                                <span class="name"><?php echo htmlspecialchars($vital['patient_name']); ?></span>
-                                <span class="code">(<?php echo htmlspecialchars($vital['patient_code']); ?>)</span>
-                                <br>
-                                <span style="font-size: 12px; color: #64748b;">
-                                    <i class="fas fa-stethoscope"></i> <?php echo htmlspecialchars($vital['visit_code']); ?>
-                                    <span style="margin: 0 4px;">|</span>
-                                    <?php echo htmlspecialchars($vital['visit_type'] ?? 'N/A'); ?>
-                                </span>
-                            </div>
-                        </div>
-                        <div>
-                            <span style="font-size: 12px; color: #64748b;">
-                                <i class="fas fa-user-md"></i> <?php echo htmlspecialchars($vital['recorded_by_name'] ?? 'Unknown'); ?>
-                            </span>
-                            <br>
-                            <span class="record-meta">
-                                <?php echo date('M d, Y g:i A', strtotime($vital['recorded_at'])); ?>
-                            </span>
-                        </div>
-                    </div>
-                    
-                    <div class="vital-grid">
-                        <?php if ($vital['temperature_c']): ?>
-                        <div class="vital-item">
-                            <div class="value <?php echo ($vital['temperature_c'] > 38 || $vital['temperature_c'] < 36) ? 'abnormal' : 'normal'; ?>">
-                                <?php echo number_format($vital['temperature_c'], 1); ?>
-                            </div>
-                            <div class="label">Temperature <span class="unit">°C</span></div>
-                        </div>
-                        <?php endif; ?>
-                        
-                        <?php if ($vital['pulse_bpm']): ?>
-                        <div class="vital-item">
-                            <div class="value <?php echo ($vital['pulse_bpm'] > 100 || $vital['pulse_bpm'] < 60) ? 'abnormal' : 'normal'; ?>">
-                                <?php echo $vital['pulse_bpm']; ?>
-                            </div>
-                            <div class="label">Pulse <span class="unit">BPM</span></div>
-                        </div>
-                        <?php endif; ?>
-                        
-                        <?php if ($vital['blood_pressure']): ?>
-                        <div class="vital-item">
-                            <div class="value"><?php echo htmlspecialchars($vital['blood_pressure']); ?></div>
-                            <div class="label">Blood Pressure <span class="unit">mmHg</span></div>
-                        </div>
-                        <?php endif; ?>
-                        
-                        <?php if ($vital['respiration_rate']): ?>
-                        <div class="vital-item">
-                            <div class="value <?php echo ($vital['respiration_rate'] > 20 || $vital['respiration_rate'] < 12) ? 'abnormal' : 'normal'; ?>">
-                                <?php echo $vital['respiration_rate']; ?>
-                            </div>
-                            <div class="label">Respiration <span class="unit">/min</span></div>
-                        </div>
-                        <?php endif; ?>
-                        
-                        <?php if ($vital['spo2_percent']): ?>
-                        <div class="vital-item">
-                            <div class="value <?php echo $vital['spo2_percent'] < 95 ? 'abnormal' : 'normal'; ?>">
-                                <?php echo $vital['spo2_percent']; ?>%
-                            </div>
-                            <div class="label">SpO2</div>
-                        </div>
-                        <?php endif; ?>
-                        
-                        <?php if ($vital['weight_kg']): ?>
-                        <div class="vital-item">
-                            <div class="value"><?php echo number_format($vital['weight_kg'], 1); ?></div>
-                            <div class="label">Weight <span class="unit">kg</span></div>
-                        </div>
-                        <?php endif; ?>
-                        
-                        <?php if ($vital['height_cm']): ?>
-                        <div class="vital-item">
-                            <div class="value"><?php echo number_format($vital['height_cm'], 1); ?></div>
-                            <div class="label">Height <span class="unit">cm</span></div>
-                        </div>
-                        <?php endif; ?>
-                    </div>
-                    
-                    <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e2e8f0; display: flex; gap: 8px; justify-content: flex-end;">
-                        <a href="vital_signs.php?action=edit_vital&id=<?php echo $vital['vital_id']; ?>" class="btn-edit">
-                            <i class="fas fa-edit"></i> Edit
-                        </a>
-                        <a href="vital_signs.php?action=delete_vital&id=<?php echo $vital['vital_id']; ?>" class="btn-delete" onclick="return confirm('Are you sure you want to delete this vital signs record?');">
-                            <i class="fas fa-trash"></i> Delete
-                        </a>
+            <details open style="margin-bottom: 20px;">
+                <summary style="cursor: pointer; font-size: 18px; font-weight: 700; color: #1e293b; padding: 14px 0;">
+                    <i class="fas fa-user-clock"></i> Patients Waiting for Vitals (<?php echo count($vitalQueue); ?>)
+                </summary>
+                <div class="table-card">
+                    <div class="table-responsive">
+                        <table class="recent-table">
+                            <thead><tr><th>#</th><th>Patient</th><th>Visit</th><th>Arrival</th><th>Status</th><th>Action</th></tr></thead>
+                            <tbody>
+                                <?php if (empty($vitalQueue)): ?>
+                                    <tr><td colspan="6" style="text-align: center; color: #94a3b8; padding: 32px;">No patients are waiting for vital signs.</td></tr>
+                                <?php else: ?>
+                                    <?php foreach ($vitalQueue as $position => $queuePatient): ?>
+                                    <tr>
+                                        <td><?php echo $position + 1; ?></td>
+                                        <td><strong><?php echo htmlspecialchars($queuePatient['patient_name']); ?></strong><br><small><?php echo htmlspecialchars($queuePatient['patient_code']); ?></small></td>
+                                        <td><?php echo htmlspecialchars($queuePatient['visit_code']); ?></td>
+                                        <td><?php echo date('M d, Y g:i A', strtotime($queuePatient['admitted_at'])); ?></td>
+                                        <td><?php echo htmlspecialchars($queuePatient['visit_status']); ?></td>
+                                        <td><a href="vital_signs.php?action=create_vital&visit_id=<?php echo $queuePatient['visit_id']; ?>" class="btn-create-action"><i class="fas fa-heartbeat"></i> Fill Vital</a></td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
-                <?php endforeach; ?>
-            <?php endif; ?>
+            </details>
+
+            <details open>
+                <summary style="cursor: pointer; font-size: 18px; font-weight: 700; color: #1e293b; padding: 14px 0;">
+                    <i class="fas fa-history"></i> Previous Vital Records (<?php echo count($vitalSigns); ?>)
+                </summary>
+                <div class="table-card">
+                    <div class="table-responsive">
+                        <table class="recent-table">
+                            <thead><tr><th>Patient</th><th>Visit</th><th>Temperature</th><th>Pulse</th><th>BP</th><th>SpO2</th><th>Recorded</th><th>Actions</th></tr></thead>
+                            <tbody>
+                                <?php if (empty($vitalSigns)): ?>
+                                    <tr><td colspan="8" style="text-align: center; color: #94a3b8; padding: 32px;">No vital records found.</td></tr>
+                                <?php else: ?>
+                                    <?php foreach ($vitalSigns as $vital): ?>
+                                    <tr>
+                                        <td><strong><?php echo htmlspecialchars($vital['patient_name']); ?></strong><br><small><?php echo htmlspecialchars($vital['patient_code']); ?></small></td>
+                                        <td><?php echo htmlspecialchars($vital['visit_code']); ?></td>
+                                        <td><?php echo $vital['temperature_c'] !== null ? number_format($vital['temperature_c'], 1) . ' °C' : '-'; ?></td>
+                                        <td><?php echo $vital['pulse_bpm'] !== null ? htmlspecialchars($vital['pulse_bpm']) . ' BPM' : '-'; ?></td>
+                                        <td><?php echo htmlspecialchars($vital['blood_pressure'] ?? '-'); ?></td>
+                                        <td><?php echo $vital['spo2_percent'] !== null ? htmlspecialchars($vital['spo2_percent']) . '%' : '-'; ?></td>
+                                        <td><?php echo date('M d, Y g:i A', strtotime($vital['recorded_at'])); ?></td>
+                                        <td>
+                                            <a href="vital_signs.php?action=edit_vital&id=<?php echo $vital['vital_id']; ?>" class="btn-edit"><i class="fas fa-edit"></i></a>
+                                            <a href="vital_signs.php?action=delete_vital&id=<?php echo $vital['vital_id']; ?>" class="btn-delete" onclick="return confirm('Are you sure you want to delete this vital signs record?');"><i class="fas fa-trash"></i></a>
+                                        </td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </details>
         </main>
     </div>
 
@@ -730,21 +692,10 @@ $stats = $statsResult->fetch_assoc();
                 <div class="form-row">
                     <div class="form-group">
                         <label for="visit_id">Visit *</label>
-                        <?php if ($selectedVisitId > 0): ?>
-                            <?php foreach ($visits as $visit): if ((int) $visit['visit_id'] === $selectedVisitId): ?>
-                                <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
-                                <input type="text" value="<?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['patient_name'] . ' (' . $visit['patient_code'] . ')'); ?>" readonly>
-                            <?php endif; endforeach; ?>
-                        <?php else: ?>
-                        <select id="visit_id" name="visit_id" required>
-                            <option value="">Select Visit</option>
-                            <?php foreach ($visits as $visit): ?>
-                                <option value="<?php echo $visit['visit_id']; ?>" <?php echo $selectedVisitId === (int) $visit['visit_id'] ? 'selected' : ''; ?>>
-                                    <?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['patient_name'] . ' (' . $visit['patient_code'] . ')'); ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                        <?php endif; ?>
+                        <?php foreach ($visits as $visit): if ((int) $visit['visit_id'] === $selectedVisitId): ?>
+                            <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
+                            <input type="text" value="<?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['patient_name'] . ' (' . $visit['patient_code'] . ')'); ?>" readonly>
+                        <?php endif; endforeach; ?>
                     </div>
                     <div class="form-group">
                         <label for="recorded_by">Recorded By</label>

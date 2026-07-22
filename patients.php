@@ -143,7 +143,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             'visit_type_id' => getLookupId($conn, 'lookup_visit_types', 'name', 'OPD'),
             'department_id' => getLookupId($conn, 'lookup_departments', 'code', 'OPD'),
             'attending_doctor_id' => null,
-            'visit_status_id' => getLookupId($conn, 'lookup_visit_statuses', 'name', 'Registered'),
+            'visit_status_id' => getLookupId($conn, 'lookup_visit_statuses', 'name', 'Awaiting Billing'),
             'notes' => 'Automatically created during patient registration'
         ];
         $visitId = createVisit($conn, $visitData);

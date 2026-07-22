@@ -101,7 +101,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $query = "INSERT INTO invoices (invoice_code, visit_id, patient_id, invoice_status_id, subtotal, total) 
                   VALUES (?, ?, ?, ?, ?, ?)";
         $stmt = $conn->prepare($query);
-        $stmt->bind_param('siidd', 
+        $stmt->bind_param('siiddd', 
             $invoiceCode,
             $visitId,
             $visit['patient_id'],
@@ -162,10 +162,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $error = 'Payment amount cannot exceed invoice total.';
     } else {
         // Add payment
+        $receivedBy = intval($_SESSION['user_id']);
         $query = "INSERT INTO payments (invoice_id, payment_method_id, amount, received_by) 
                   VALUES (?, ?, ?, ?)";
         $stmt = $conn->prepare($query);
-        $stmt->bind_param('iidi', $invoiceId, $paymentMethodId, $amount, $_SESSION['user_id']);
+        $stmt->bind_param('iidi', $invoiceId, $paymentMethodId, $amount, $receivedBy);
         
         if ($stmt->execute()) {
             // Update invoice status
@@ -191,7 +192,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $updateStmt->execute();
 
             if ($newStatus === 'Paid') {
-                updateVisitStatus($conn, $invoice['visit_id'], 'In Consultation');
+                updateVisitStatus($conn, $invoice['visit_id'], 'Registered');
             }
             
             logUserActivity($conn, $_SESSION['user_id'], 'Processed Payment', "Payment of \${$amount} for invoice ID: {$invoiceId}");
@@ -215,11 +216,13 @@ $query = "SELECT i.*,
           CONCAT(p.first_name, ' ', p.last_name) as patient_name,
           p.patient_code,
           v.visit_code,
+          vs.name as visit_status,
           is_l.name as status_name,
           (SELECT SUM(amount) FROM payments WHERE invoice_id = i.invoice_id) as paid_amount
           FROM invoices i
           JOIN patients p ON i.patient_id = p.patient_id
           JOIN visits v ON i.visit_id = v.visit_id
+          JOIN lookup_visit_statuses vs ON v.visit_status_id = vs.visit_status_id
           JOIN lookup_invoice_statuses is_l ON i.invoice_status_id = is_l.invoice_status_id
           WHERE 1=1";
 
@@ -604,6 +607,7 @@ if (isset($_GET['message'])) {
                                 <th>Invoice #</th>
                                 <th>Patient</th>
                                 <th>Visit</th>
+                                <th>Visit Status</th>
                                 <th>Items</th>
                                 <th>Total</th>
                                 <th>Paid</th>
@@ -616,7 +620,7 @@ if (isset($_GET['message'])) {
                         <tbody>
                             <?php if (empty($invoices)): ?>
                                 <tr>
-                                    <td colspan="10" style="text-align: center; color: #94a3b8; padding: 40px;">
+                                    <td colspan="11" style="text-align: center; color: #94a3b8; padding: 40px;">
                                         <i class="fas fa-file-invoice" style="font-size: 32px; display: block; margin-bottom: 8px;"></i>
                                         No invoices found
                                     </td>
@@ -637,6 +641,11 @@ if (isset($_GET['message'])) {
                                         </div>
                                     </td>
                                     <td><?php echo htmlspecialchars($invoice['visit_code']); ?></td>
+                                    <td>
+                                        <span class="status-badge-billing status-<?php echo strtolower(str_replace(' ', '', $invoice['visit_status'])); ?>">
+                                            <?php echo htmlspecialchars($invoice['visit_status']); ?>
+                                        </span>
+                                    </td>
                                     <td>
                                         <div class="invoice-items-list">
                                             <?php if (isset($invoiceItems[$invoice['invoice_id']])): ?>

@@ -189,6 +189,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $updateStmt = $conn->prepare($updateQuery);
             $updateStmt->bind_param('ii', $statusId, $invoiceId);
             $updateStmt->execute();
+
+            if ($newStatus === 'Paid') {
+                updateVisitStatus($conn, $invoice['visit_id'], 'Discharged');
+            }
             
             logUserActivity($conn, $_SESSION['user_id'], 'Processed Payment', "Payment of \${$amount} for invoice ID: {$invoiceId}");
             $message = 'Payment processed successfully!';

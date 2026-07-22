@@ -100,7 +100,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     
     $result = updateLabResult($conn, intval($_POST['order_id']), $resultData);
     if ($result) {
-        updateVisitStatus($conn, intval($_POST['visit_id'] ?? 0), 'Awaiting Billing');
+        $visitStmt = $conn->prepare("SELECT visit_id FROM lab_orders WHERE order_id = ?");
+        $visitStmt->bind_param('i', $_POST['order_id']);
+        $visitStmt->execute();
+        $visitRow = $visitStmt->get_result()->fetch_assoc();
+        if ($visitRow) {
+            updateVisitStatus($conn, $visitRow['visit_id'], 'Awaiting Billing');
+        }
         logUserActivity($conn, $_SESSION['user_id'], 'Added Lab Result', "Added result for order ID: {$_POST['order_id']}");
         $message = 'Lab result added successfully!';
         header('Location: lab.php?message=' . urlencode($message));

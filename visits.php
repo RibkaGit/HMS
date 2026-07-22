@@ -47,6 +47,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     
     $result = createVisit($conn, $data);
     if ($result) {
+        if ($data['attending_doctor_id']) {
+            updateVisitStatus($conn, $result, 'In Consultation');
+        }
         logUserActivity($conn, $_SESSION['user_id'], 'Created Visit', "Created visit: {$data['visit_code']}");
         $message = 'Visit created successfully!';
         header('Location: visits.php?message=' . urlencode($message));
@@ -84,6 +87,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     );
     
     if ($stmt->execute()) {
+        if ($data['attending_doctor_id']) {
+            updateVisitStatus($conn, $visitId, 'In Consultation');
+        }
         logUserActivity($conn, $_SESSION['user_id'], 'Updated Visit', "Updated visit ID: {$visitId}");
         $message = 'Visit updated successfully!';
         header('Location: visits.php?message=' . urlencode($message));

@@ -57,12 +57,6 @@ $currentPage = basename($_SERVER['PHP_SELF']);
                     <span>Doctors</span>
                 </a>
             </li>
-            <li class="<?php echo $currentPage == 'assign_doctor.php' ? 'active' : ''; ?>">
-                <a href="assign_doctor.php">
-                    <i class="fas fa-user-plus"></i>
-                    <span>Assign Doctor</span>
-                </a>
-            </li>
             <li class="<?php echo $currentPage == 'medical_records.php' ? 'active' : ''; ?>">
                 <a href="medical_records.php">
                     <i class="fas fa-notes-medical"></i>

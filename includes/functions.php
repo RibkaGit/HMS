@@ -217,6 +217,16 @@ function getCurrentUserRole() {
 }
 
 /**
+ * Move a visit to a workflow status when a related action completes.
+ */
+function updateVisitStatus($conn, $visitId, $statusName) {
+    $query = "UPDATE visits SET visit_status_id = (SELECT visit_status_id FROM lookup_visit_statuses WHERE name = ?) WHERE visit_id = ?";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param('si', $statusName, $visitId);
+    return $stmt->execute();
+}
+
+/**
  * Require login - redirects if not logged in
  */
 function requireLogin() {

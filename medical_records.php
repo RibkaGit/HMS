@@ -19,6 +19,7 @@ $userInitial = strtoupper(substr($userName, 0, 1));
 
 $message = '';
 $error = '';
+$selectedVisitId = isset($_GET['visit_id']) ? intval($_GET['visit_id']) : 0;
 
 // Get all patients for dropdown
 $patients = $conn->query("SELECT patient_id, patient_code, first_name, last_name FROM patients WHERE is_active = 1 ORDER BY first_name")->fetch_all(MYSQLI_ASSOC);
@@ -543,7 +544,7 @@ if (isset($_GET['message'])) {
                         <select id="visit_id" name="visit_id">
                             <option value="">Select Visit</option>
                             <?php foreach ($visits as $visit): ?>
-                                <option value="<?php echo $visit['visit_id']; ?>">
+                                <option value="<?php echo $visit['visit_id']; ?>" <?php echo $selectedVisitId === (int) $visit['visit_id'] ? 'selected' : ''; ?>>
                                     <?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['patient_name']); ?>
                                 </option>
                             <?php endforeach; ?>

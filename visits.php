@@ -158,6 +158,8 @@ if (isset($_GET['action']) && $_GET['action'] === 'edit' && isset($_GET['id'])) 
     $editVisit = getVisitById($conn, intval($_GET['id']));
 }
 
+$selectedPatientId = isset($_GET['patient_id']) ? intval($_GET['patient_id']) : 0;
+
 if (isset($_GET['message'])) {
     $message = urldecode($_GET['message']);
 }
@@ -452,6 +454,23 @@ if (isset($_GET['message'])) {
                                             <a href="visits.php?action=edit&id=<?php echo $visit['visit_id']; ?>" class="btn-edit">
                                                 <i class="fas fa-edit"></i> Edit
                                             </a>
+                                            <a href="vital_signs.php?action=create_vital&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
+                                                <i class="fas fa-heartbeat"></i> Vital
+                                            </a>
+                                            <a href="medical_records.php?action=create_record&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
+                                                <i class="fas fa-file-medical"></i> Record
+                                            </a>
+                                            <a href="lab.php?action=create&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
+                                                <i class="fas fa-flask"></i> Lab
+                                            </a>
+                                            <a href="pharmacy.php?action=create_prescription&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
+                                                <i class="fas fa-pills"></i> Medication
+                                            </a>
+                                            <?php if ($visit['visit_type'] === 'IPD'): ?>
+                                                <a href="bed_management.php?action=assign_bed&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
+                                                    <i class="fas fa-bed"></i> Bed
+                                                </a>
+                                            <?php endif; ?>
                                             <?php if ($visit['visit_status'] !== 'Cancelled' && $visit['visit_status'] !== 'Discharged'): ?>
                                                 <a href="visits.php?action=delete&id=<?php echo $visit['visit_id']; ?>" class="btn-delete" onclick="return confirm('Are you sure you want to cancel this visit?');">
                                                     <i class="fas fa-times"></i> Cancel
@@ -487,7 +506,7 @@ if (isset($_GET['message'])) {
                         <select id="patient_id" name="patient_id" required <?php echo $editVisit ? 'disabled' : ''; ?>>
                             <option value="">Select Patient</option>
                             <?php foreach ($patients as $patient): ?>
-                                <option value="<?php echo $patient['patient_id']; ?>" <?php echo (isset($editVisit['patient_id']) && $editVisit['patient_id'] == $patient['patient_id']) ? 'selected' : ''; ?>>
+                                <option value="<?php echo $patient['patient_id']; ?>" <?php echo ((isset($editVisit['patient_id']) && $editVisit['patient_id'] == $patient['patient_id']) || (!$editVisit && $selectedPatientId == $patient['patient_id'])) ? 'selected' : ''; ?>>
                                     <?php echo htmlspecialchars($patient['patient_code'] . ' - ' . $patient['first_name'] . ' ' . $patient['last_name']); ?>
                                 </option>
                             <?php endforeach; ?>

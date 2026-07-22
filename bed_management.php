@@ -19,6 +19,7 @@ $userInitial = strtoupper(substr($userName, 0, 1));
 
 $message = '';
 $error = '';
+$selectedVisitId = isset($_GET['visit_id']) ? intval($_GET['visit_id']) : 0;
 $activeTab = isset($_GET['tab']) ? $_GET['tab'] : 'overview';
 
 // Get all wards with department info
@@ -965,7 +966,7 @@ if (isset($_GET['message'])) {
                 <div class="alert alert-warning" style="background: #fef3c7; color: #d97706; border-color: #fde68a; margin-top: 20px;">
                     <i class="fas fa-exclamation-triangle"></i>
                     <strong><?php echo count($unassignedVisits); ?> IPD patients need bed assignment!</strong>
-                    <a href="bed_management.php?action=assign_bed" style="color: #d97706; font-weight: 600; text-decoration: underline;">Assign beds now</a>
+                                    <a href="bed_management.php?action=assign_bed" style="color: #d97706; font-weight: 600; text-decoration: underline;">Assign beds now</a>
                 </div>
                 <?php endif; ?>
             </div>
@@ -1445,7 +1446,7 @@ if (isset($_GET['message'])) {
                     <select id="visit_id" name="visit_id" required>
                         <option value="">Select Visit</option>
                         <?php foreach ($unassignedVisits as $visit): ?>
-                            <option value="<?php echo $visit['visit_id']; ?>">
+                            <option value="<?php echo $visit['visit_id']; ?>" <?php echo $selectedVisitId === (int) $visit['visit_id'] ? 'selected' : ''; ?>>
                                 <?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['patient_name'] . ' (' . $visit['patient_code'] . ')'); ?>
                             </option>
                         <?php endforeach; ?>

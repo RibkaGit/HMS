@@ -1,3 +1,19 @@
+.btn-create-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    background: #e0f2fe;
+    color: #0369a1;
+    font-size: 12px;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.btn-create-action:hover {
+    background: #bae6fd;
+}
 /* ============================================================================
    HOSPITAL MANAGEMENT SYSTEM - PROFESSIONAL DASHBOARD CSS
    ============================================================================ */

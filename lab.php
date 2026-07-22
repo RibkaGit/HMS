@@ -19,6 +19,7 @@ $userInitial = strtoupper(substr($userName, 0, 1));
 
 $message = '';
 $error = '';
+$selectedVisitId = isset($_GET['visit_id']) ? intval($_GET['visit_id']) : 0;
 
 // Get visits for dropdown
 $visits = $conn->query("SELECT v.visit_id, v.visit_code, p.first_name, p.last_name 
@@ -39,21 +40,30 @@ $doctors = $conn->query("SELECT staff_id, first_name, last_name FROM staff WHERE
 // CREATE LAB ORDER
 // ============================================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'create') {
-    $data = [
-        'visit_id' => intval($_POST['visit_id']),
-        'test_type_id' => intval($_POST['test_type_id']),
-        'ordered_by' => intval($_POST['ordered_by']),
-        'order_status_id' => getLookupId($conn, 'lookup_order_statuses', 'name', 'Ordered')
-    ];
-    
-    $result = createLabOrder($conn, $data);
-    if ($result) {
-        logUserActivity($conn, $_SESSION['user_id'], 'Created Lab Order', "Created lab order ID: {$result}");
+    $visitId = intval($_POST['visit_id']);
+    $testTypeIds = array_map('intval', $_POST['test_type_ids'] ?? []);
+    $orderedBy = intval($_POST['ordered_by']);
+    $orderStatusId = getLookupId($conn, 'lookup_order_statuses', 'name', 'Ordered');
+    $createdCount = 0;
+    foreach ($testTypeIds as $testTypeId) {
+        $data = [
+            'visit_id' => $visitId,
+            'test_type_id' => $testTypeId,
+            'ordered_by' => $orderedBy,
+            'order_status_id' => $orderStatusId
+        ];
+        if (createLabOrder($conn, $data)) {
+            $createdCount++;
+        }
+    }
+    if ($createdCount > 0) {
+        updateVisitStatus($conn, $visitId, 'Awaiting Results');
+        logUserActivity($conn, $_SESSION['user_id'], 'Created Lab Orders', "Created {$createdCount} lab order(s) for visit ID: {$visitId}");
         $message = 'Lab order created successfully!';
         header('Location: lab.php?message=' . urlencode($message));
         exit();
     } else {
-        $error = 'Failed to create lab order. Please try again.';
+        $error = 'Select at least one test and try again.';
     }
 }
 
@@ -90,6 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     
     $result = updateLabResult($conn, intval($_POST['order_id']), $resultData);
     if ($result) {
+        updateVisitStatus($conn, intval($_POST['visit_id'] ?? 0), 'Awaiting Billing');
         logUserActivity($conn, $_SESSION['user_id'], 'Added Lab Result', "Added result for order ID: {$_POST['order_id']}");
         $message = 'Lab result added successfully!';
         header('Location: lab.php?message=' . urlencode($message));
@@ -569,7 +580,7 @@ if (!empty($labOrders)) {
                     <select id="visit_id" name="visit_id" required>
                         <option value="">Select Visit</option>
                         <?php foreach ($visits as $visit): ?>
-                            <option value="<?php echo $visit['visit_id']; ?>">
+                            <option value="<?php echo $visit['visit_id']; ?>" <?php echo $selectedVisitId === (int) $visit['visit_id'] ? 'selected' : ''; ?>>
                                 <?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['first_name'] . ' ' . $visit['last_name']); ?>
                             </option>
                         <?php endforeach; ?>
@@ -577,15 +588,15 @@ if (!empty($labOrders)) {
                 </div>
                 
                 <div class="form-group">
-                    <label for="test_type_id">Test Type *</label>
-                    <select id="test_type_id" name="test_type_id" required>
-                        <option value="">Select Test</option>
+                    <label>Tests needed for this patient *</label>
+                    <div class="test-checklist">
                         <?php foreach ($testTypes as $test): ?>
-                            <option value="<?php echo $test['test_type_id']; ?>">
+                            <label style="display: block; margin: 8px 0;">
+                                <input type="checkbox" name="test_type_ids[]" value="<?php echo $test['test_type_id']; ?>">
                                 <?php echo htmlspecialchars($test['name'] . ' (' . $test['category'] . ') - $' . number_format($test['price'], 2)); ?>
-                            </option>
+                            </label>
                         <?php endforeach; ?>
-                    </select>
+                    </div>
                 </div>
                 
                 <div class="form-group">

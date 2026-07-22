@@ -19,6 +19,7 @@ $userInitial = strtoupper(substr($userName, 0, 1));
 
 $message = '';
 $error = '';
+$selectedVisitId = isset($_GET['visit_id']) ? intval($_GET['visit_id']) : 0;
 
 // Get all medications
 $medications = $conn->query("SELECT * FROM medications WHERE is_active = 1 ORDER BY name")->fetch_all(MYSQLI_ASSOC);
@@ -970,7 +971,7 @@ $lowStock = $conn->query("SELECT * FROM medications WHERE stock_quantity <= reor
                         <select id="visit_id" name="visit_id" required>
                             <option value="">Select Visit</option>
                             <?php foreach ($visits as $visit): ?>
-                                <option value="<?php echo $visit['visit_id']; ?>">
+                                    <option value="<?php echo $visit['visit_id']; ?>" <?php echo $selectedVisitId === (int) $visit['visit_id'] ? 'selected' : ''; ?>>
                                     <?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['first_name'] . ' ' . $visit['last_name']); ?>
                                 </option>
                             <?php endforeach; ?>

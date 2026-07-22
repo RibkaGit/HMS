@@ -19,6 +19,7 @@ $userInitial = strtoupper(substr($userName, 0, 1));
 
 $message = '';
 $error = '';
+$selectedVisitId = isset($_GET['visit_id']) ? intval($_GET['visit_id']) : 0;
 
 // Get all visits for dropdown
 $visits = $conn->query("SELECT v.visit_id, v.visit_code, 
@@ -732,7 +733,7 @@ $stats = $statsResult->fetch_assoc();
                         <select id="visit_id" name="visit_id" required>
                             <option value="">Select Visit</option>
                             <?php foreach ($visits as $visit): ?>
-                                <option value="<?php echo $visit['visit_id']; ?>">
+                                <option value="<?php echo $visit['visit_id']; ?>" <?php echo $selectedVisitId === (int) $visit['visit_id'] ? 'selected' : ''; ?>>
                                     <?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['patient_name'] . ' (' . $visit['patient_code'] . ')'); ?>
                                 </option>
                             <?php endforeach; ?>

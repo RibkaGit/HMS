@@ -69,6 +69,12 @@ $currentPage = basename($_SERVER['PHP_SELF']);
                     <span>Laboratory</span>
                 </a>
             </li>
+            <li class="<?php echo $currentPage == 'radiology.php' ? 'active' : ''; ?>">
+                <a href="radiology.php">
+                    <i class="fas fa-x-ray"></i>
+                    <span>Radiology</span>
+                </a>
+            </li>
             <li class="<?php echo $currentPage == 'bed_management.php' ? 'active' : ''; ?>">
                 <a href="bed_management.php">
                     <i class="fas fa-bed"></i>

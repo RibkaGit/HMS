@@ -64,7 +64,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $flag = $_POST['flag'] ?? '';
     $value = isset($_POST['value']) && $_POST['value'] === '1' ? 1 : 0;
 
-    if ($recordId <= 0 || !in_array($flag, ['needs_lab', 'needs_bed'], true)) {
+    if ($recordId <= 0 || !in_array($flag, ['needs_lab', 'needs_radiology', 'needs_bed'], true)) {
         echo json_encode(['success' => false, 'error' => 'Invalid request']);
         exit();
     }
@@ -74,7 +74,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $stmt->bind_param('ii', $value, $recordId);
 
     if ($stmt->execute()) {
-        $label = $flag === 'needs_lab' ? 'lab referral' : 'bed referral';
+        $label = $flag === 'needs_lab' ? 'lab referral' : ($flag === 'needs_radiology' ? 'radiology referral' : 'bed referral');
         logUserActivity($conn, $_SESSION['user_id'], 'Updated Medical Record', "Set {$label} to {$value} for record ID: {$recordId}");
         echo json_encode(['success' => true, 'value' => $value]);
     } else {
@@ -89,16 +89,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'create_record') {
     $needsLab = isset($_POST['needs_lab']) ? 1 : 0;
     $needsBed = isset($_POST['needs_bed']) ? 1 : 0;
-    $query = "INSERT INTO medical_records (visit_id, patient_id, doctor_id, diagnosis, clinical_notes, needs_lab, needs_bed) 
-              VALUES (?, ?, ?, ?, ?, ?, ?)";
+    $needsRadiology = isset($_POST['needs_radiology']) ? 1 : 0;
+    $query = "INSERT INTO medical_records (visit_id, patient_id, doctor_id, diagnosis, clinical_notes, needs_lab, needs_radiology, needs_bed) 
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
     $stmt = $conn->prepare($query);
-    $stmt->bind_param('iiissii', 
+    $stmt->bind_param('iiissiii', 
         $_POST['visit_id'],
         $_POST['patient_id'],
         $_POST['doctor_id'],
         $_POST['diagnosis'],
         $_POST['clinical_notes'],
         $needsLab,
+        $needsRadiology,
         $needsBed
     );
     
@@ -106,10 +108,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $recordId = $conn->insert_id;
         logUserActivity($conn, $_SESSION['user_id'], 'Created Medical Record', "Created medical record ID: {$recordId}");
         $message = 'Medical record created successfully!';
-        if ($needsLab || $needsBed) {
+        if ($needsLab || $needsRadiology || $needsBed) {
             $parts = [];
             if ($needsLab) {
                 $parts[] = 'sent to lab queue';
+            }
+            if ($needsRadiology) {
+                $parts[] = 'sent to radiology queue';
             }
             if ($needsBed) {
                 $parts[] = 'sent to bed queue';
@@ -213,6 +218,18 @@ if (!empty($params)) {
 }
 $stmt->execute();
 $medicalRecords = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+$pendingRecordQuery = "SELECT mr.record_id, mr.visit_id, mr.diagnosis, mr.created_at,
+                       CONCAT(p.first_name, ' ', p.last_name) as patient_name,
+                       p.patient_code, v.visit_code,
+                       CONCAT(d.first_name, ' ', d.last_name) as doctor_name
+                       FROM medical_records mr
+                       JOIN patients p ON mr.patient_id = p.patient_id
+                       JOIN visits v ON mr.visit_id = v.visit_id
+                       JOIN staff d ON mr.doctor_id = d.staff_id
+                       WHERE mr.created_at = (SELECT MIN(mr2.created_at) FROM medical_records mr2 WHERE mr2.visit_id = mr.visit_id)
+                       ORDER BY mr.created_at ASC LIMIT 100";
+$pendingRecords = $conn->query($pendingRecordQuery)->fetch_all(MYSQLI_ASSOC);
 
 // Get record for edit
 $editRecord = null;
@@ -480,6 +497,11 @@ if (isset($_GET['message'])) {
             border-color: #93c5fd;
             color: #2563eb;
         }
+        .referral-toggle.checked-radiology {
+            background: #f3e8ff;
+            border-color: #d8b4fe;
+            color: #7c3aed;
+        }
         .referral-toggle.checked-bed {
             background: #fef3c7;
             border-color: #fcd34d;
@@ -669,6 +691,37 @@ if (isset($_GET['message'])) {
             </div>
 
             <div class="table-card">
+                <details open>
+                    <summary style="cursor: pointer; padding: 14px 0; font-size: 18px; font-weight: 700; color: #1e293b;">
+                        <i class="fas fa-user-clock"></i> Patients Waiting for Doctor Record (<?php echo count($pendingRecords); ?>)
+                    </summary>
+                    <div class="table-responsive">
+                        <table class="recent-table">
+                            <thead><tr><th>#</th><th>Patient</th><th>Visit</th><th>Doctor</th><th>Arrival</th><th>Action</th></tr></thead>
+                            <tbody>
+                                <?php if (empty($pendingRecords)): ?>
+                                    <tr><td colspan="6" style="text-align: center; color: #94a3b8; padding: 32px;">No new patients are waiting for a doctor record.</td></tr>
+                                <?php else: foreach ($pendingRecords as $position => $pending): ?>
+                                    <tr>
+                                        <td><?php echo $position + 1; ?></td>
+                                        <td><strong><?php echo htmlspecialchars($pending['patient_name']); ?></strong><br><small><?php echo htmlspecialchars($pending['patient_code']); ?></small></td>
+                                        <td><?php echo htmlspecialchars($pending['visit_code']); ?></td>
+                                        <td><?php echo htmlspecialchars($pending['doctor_name']); ?></td>
+                                        <td><?php echo date('M d, Y g:i A', strtotime($pending['created_at'])); ?></td>
+                                        <td><a href="medical_records.php?action=create_record&visit_id=<?php echo $pending['visit_id']; ?>" class="btn-create-action"><i class="fas fa-file-medical"></i> Fill Record</a></td>
+                                    </tr>
+                                <?php endforeach; endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </details>
+            </div>
+
+            <div class="table-card">
+                <details open>
+                    <summary style="cursor: pointer; padding: 14px 0; font-size: 18px; font-weight: 700; color: #1e293b;">
+                        <i class="fas fa-history"></i> Previous Medical Records (<?php echo count($medicalRecords); ?>)
+                    </summary>
                 <div class="table-responsive">
                     <table class="recent-table">
                         <thead>
@@ -729,6 +782,14 @@ if (isset($_GET['message'])) {
                                                     <span><i class="fas fa-flask"></i> Lab</span>
                                                 <?php endif; ?>
                                             </label>
+                                            <label class="referral-toggle <?php echo !empty($record['needs_radiology']) ? 'checked-radiology' : ''; ?>" title="Mark patient for radiology">
+                                                <input type="checkbox" class="flag-toggle" data-record-id="<?php echo $record['record_id']; ?>" data-flag="needs_radiology" <?php echo !empty($record['needs_radiology']) ? 'checked' : ''; ?>">
+                                                <?php if (!empty($record['needs_radiology']) && $record['visit_id']): ?>
+                                                    <a href="radiology.php?action=create&visit_id=<?php echo $record['visit_id']; ?>" title="Open radiology page"><i class="fas fa-x-ray"></i> Radiology</a>
+                                                <?php else: ?>
+                                                    <span><i class="fas fa-x-ray"></i> Radiology</span>
+                                                <?php endif; ?>
+                                            </label>
                                             <label class="referral-toggle <?php echo !empty($record['needs_bed']) ? 'checked-bed' : ''; ?>" title="Mark patient for bed assignment">
                                                 <input type="checkbox" class="flag-toggle" data-record-id="<?php echo $record['record_id']; ?>" data-flag="needs_bed" <?php echo !empty($record['needs_bed']) ? 'checked' : ''; ?>>
                                                 <?php if (!empty($record['needs_bed']) && $record['visit_id']): ?>
@@ -751,6 +812,7 @@ if (isset($_GET['message'])) {
                         </tbody>
                     </table>
                 </div>
+                </details>
             </div>
         </main>
     </div>
@@ -841,6 +903,10 @@ if (isset($_GET['message'])) {
                         Patient needs laboratory tests
                     </label>
                     <label style="display: block; margin-top: 8px; font-weight: 400;">
+                        <input type="checkbox" name="needs_radiology" value="1">
+                        Patient needs radiology imaging
+                    </label>
+                    <label style="display: block; margin-top: 8px; font-weight: 400;">
                         <input type="checkbox" name="needs_bed" value="1">
                         Patient needs bed assignment
                     </label>
@@ -894,6 +960,7 @@ if (isset($_GET['message'])) {
                         return;
                     }
                     label.classList.toggle('checked-lab', flag === 'needs_lab' && checkbox.checked);
+                    label.classList.toggle('checked-radiology', flag === 'needs_radiology' && checkbox.checked);
                     label.classList.toggle('checked-bed', flag === 'needs_bed' && checkbox.checked);
                     window.location.reload();
                 })

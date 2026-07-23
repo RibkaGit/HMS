@@ -501,6 +501,9 @@ if (isset($_GET['message'])) {
                                             <a href="lab.php?action=create&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
                                                 <i class="fas fa-flask"></i> Lab
                                             </a>
+                                            <a href="radiology.php?action=create&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
+                                                <i class="fas fa-x-ray"></i> Radiology
+                                            </a>
                                             <a href="pharmacy.php?action=create_prescription&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
                                                 <i class="fas fa-pills"></i> Medication
                                             </a>

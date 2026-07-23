@@ -22,6 +22,38 @@ function getUserById($conn, $userId) {
 }
 
 /**
+ * Check if visit billing is paid
+ */
+function isVisitBillingPaid($conn, $visitId) {
+    $query = "SELECT i.status FROM invoices i 
+              WHERE i.visit_id = ? 
+              ORDER BY i.created_at DESC LIMIT 1";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param('i', $visitId);
+    $stmt->execute();
+    $result = $stmt->get_result()->fetch_assoc();
+    
+    if ($result && ($result['status'] === 'Paid' || $result['status'] === 'Partially Paid')) {
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Get assigned doctor for a visit
+ */
+function getVisitAssignedDoctor($conn, $visitId) {
+    $query = "SELECT s.staff_id, CONCAT(s.first_name, ' ', s.last_name) as doctor_name 
+              FROM visits v
+              JOIN staff s ON v.attending_doctor_id = s.staff_id
+              WHERE v.visit_id = ?";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param('i', $visitId);
+    $stmt->execute();
+    return $stmt->get_result()->fetch_assoc();
+}
+
+/**
  * Get user by username
  */
 function getUserByUsername($conn, $username) {

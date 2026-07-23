@@ -39,6 +39,9 @@ $staff = $conn->query("SELECT staff_id, first_name, last_name,
                        WHERE is_active = 1 
                        ORDER BY first_name")->fetch_all(MYSQLI_ASSOC);
 
+// Get doctors for assignment
+$doctors = $conn->query("SELECT staff_id, first_name, last_name FROM staff WHERE role_id = (SELECT role_id FROM lookup_roles WHERE name = 'Doctor') AND is_active = 1")->fetch_all(MYSQLI_ASSOC);
+
 // ============================================================================
 // CREATE VITAL SIGNS
 // ============================================================================
@@ -72,6 +75,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     
     if ($stmt->execute()) {
         $vitalId = $conn->insert_id;
+        
+        // Assign doctor if selected
+        if (!empty($_POST['attending_doctor_id'])) {
+            $doctorId = intval($_POST['attending_doctor_id']);
+            $updateVisit = $conn->prepare("UPDATE visits SET attending_doctor_id = ? WHERE visit_id = ?");
+            $updateVisit->bind_param('ii', $doctorId, $visitId);
+            $updateVisit->execute();
+            updateVisitStatus($conn, $visitId, 'Registered');
+        }
+        
         logUserActivity($conn, $_SESSION['user_id'], 'Created Vital Signs', "Created vital signs ID: {$vitalId} for visit ID: {$_POST['visit_id']}");
         $message = 'Vital signs recorded successfully!';
         header('Location: vital_signs.php?message=' . urlencode($message));
@@ -708,6 +721,17 @@ $stats = $statsResult->fetch_assoc();
                             <?php endforeach; ?>
                         </select>
                     </div>
+                </div>
+                <div class="form-group">
+                    <label for="attending_doctor_id">Assign Doctor (Optional)</label>
+                    <select id="attending_doctor_id" name="attending_doctor_id">
+                        <option value="">-- Select Doctor --</option>
+                        <?php foreach ($doctors as $doctor): ?>
+                            <option value="<?php echo $doctor['staff_id']; ?>">
+                                <?php echo htmlspecialchars($doctor['first_name'] . ' ' . $doctor['last_name']); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
                 </div>
                 <?php else: ?>
                     <input type="hidden" name="visit_id" value="<?php echo $editVital['visit_id']; ?>">

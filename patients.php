@@ -857,7 +857,7 @@ if (isset($_GET['message'])) {
                     </div>
                     <div class="form-group">
                         <label for="nationality">Nationality</label>
-                        <input type="text" id="nationality" name="nationality" value="<?php echo htmlspecialchars($editPatient['nationality'] ?? 'American'); ?>">
+                        <input type="text" id="nationality" name="nationality" value="<?php echo htmlspecialchars($editPatient['nationality'] ?? 'Ethiopia'); ?>">
                     </div>
                 </div>
 

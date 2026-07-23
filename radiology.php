@@ -33,16 +33,21 @@ $testTypes = $conn->query("SELECT * FROM lookup_test_types WHERE is_active = 1 A
 // Get order statuses
 $orderStatuses = $conn->query("SELECT * FROM lookup_order_statuses")->fetch_all(MYSQLI_ASSOC);
 
-// Get doctors for dropdown
-$doctors = $conn->query("SELECT staff_id, first_name, last_name FROM staff WHERE role_id = (SELECT role_id FROM lookup_roles WHERE name = 'Doctor') AND is_active = 1")->fetch_all(MYSQLI_ASSOC);
-
 // ============================================================================
 // CREATE RADIOLOGY ORDER
 // ============================================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'create') {
     $visitId = intval($_POST['visit_id']);
     $testTypeIds = array_map('intval', $_POST['test_type_ids'] ?? []);
-    $orderedBy = intval($_POST['ordered_by']);
+    
+    // Get the attending doctor from the visit
+    $visitQuery = "SELECT attending_doctor_id FROM visits WHERE visit_id = ?";
+    $visitStmt = $conn->prepare($visitQuery);
+    $visitStmt->bind_param('i', $visitId);
+    $visitStmt->execute();
+    $visit = $visitStmt->get_result()->fetch_assoc();
+    $orderedBy = $visit['attending_doctor_id'] ? intval($visit['attending_doctor_id']) : intval($_SESSION['user_id']);
+    
     $orderStatusId = getLookupId($conn, 'lookup_order_statuses', 'name', 'Ordered');
     $createdCount = 0;
     
@@ -737,18 +742,6 @@ if (!empty($radiologyOrders)) {
                             </label>
                         <?php endforeach; ?>
                     </div>
-                </div>
-                
-                <div class="form-group">
-                    <label for="ordered_by">Ordering Doctor *</label>
-                    <select id="ordered_by" name="ordered_by" required>
-                        <option value="">Select Doctor</option>
-                        <?php foreach ($doctors as $doctor): ?>
-                            <option value="<?php echo $doctor['staff_id']; ?>">
-                                <?php echo htmlspecialchars($doctor['first_name'] . ' ' . $doctor['last_name']); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
                 </div>
                 
                 <div class="btn-group">

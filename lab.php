@@ -33,16 +33,21 @@ $testTypes = $conn->query("SELECT * FROM lookup_test_types WHERE is_active = 1 A
 // Get order statuses
 $orderStatuses = $conn->query("SELECT * FROM lookup_order_statuses")->fetch_all(MYSQLI_ASSOC);
 
-// Get doctors for dropdown
-$doctors = $conn->query("SELECT staff_id, first_name, last_name FROM staff WHERE role_id = (SELECT role_id FROM lookup_roles WHERE name = 'Doctor') AND is_active = 1")->fetch_all(MYSQLI_ASSOC);
-
 // ============================================================================
 // CREATE LAB ORDER
 // ============================================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'create') {
     $visitId = intval($_POST['visit_id']);
     $testTypeIds = array_map('intval', $_POST['test_type_ids'] ?? []);
-    $orderedBy = intval($_POST['ordered_by']);
+    
+    // Get the attending doctor from the visit
+    $visitQuery = "SELECT attending_doctor_id FROM visits WHERE visit_id = ?";
+    $visitStmt = $conn->prepare($visitQuery);
+    $visitStmt->bind_param('i', $visitId);
+    $visitStmt->execute();
+    $visit = $visitStmt->get_result()->fetch_assoc();
+    $orderedBy = $visit['attending_doctor_id'] ? intval($visit['attending_doctor_id']) : intval($_SESSION['user_id']);
+    
     $orderStatusId = getLookupId($conn, 'lookup_order_statuses', 'name', 'Ordered');
     $createdCount = 0;
     foreach ($testTypeIds as $testTypeId) {
@@ -105,7 +110,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 }
 
 // ============================================================================
-// ADD LAB RESULT
+// ADD LAB RESULT (BULK FOR GROUPED VIEW)
+// ============================================================================
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add_bulk_results') {
+    $visitId = intval($_POST['visit_id']);
+    $successCount = 0;
+    
+    foreach ($_POST['results'] as $orderId => $resultData) {
+        if (!empty($resultData['value'])) {
+            $data = [
+                'entered_by' => $_SESSION['user_id'],
+                'result_value' => $resultData['value'],
+                'result_notes' => sanitizeInput($resultData['notes'] ?? '')
+            ];
+            if (updateLabResult($conn, intval($orderId), $data)) {
+                $successCount++;
+            }
+        }
+    }
+    
+    if ($successCount > 0) {
+        updateVisitStatus($conn, $visitId, 'Awaiting Billing');
+        
+        // Notify medical records that lab results are ready
+        $notifyStmt = $conn->prepare("UPDATE medical_records SET lab_results_ready = 1, lab_results_ready_at = NOW() WHERE visit_id = ?");
+        $notifyStmt->bind_param('i', $visitId);
+        $notifyStmt->execute();
+        
+        logUserActivity($conn, $_SESSION['user_id'], 'Added Lab Results', "Added {$successCount} lab results for visit ID: {$visitId}");
+        $message = "Successfully added {$successCount} lab result(s)! Medical records notified.";
+        header('Location: lab.php?message=' . urlencode($message));
+        exit();
+    } else {
+        $error = 'No results were added. Please try again.';
+    }
+}
+
+// ============================================================================
+// ADD LAB RESULT (SINGLE)
 // ============================================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add_result') {
     $resultData = [
@@ -122,9 +164,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $visitRow = $visitStmt->get_result()->fetch_assoc();
         if ($visitRow) {
             updateVisitStatus($conn, $visitRow['visit_id'], 'Awaiting Billing');
+            
+            // Notify medical records that lab results are ready
+            $notifyStmt = $conn->prepare("UPDATE medical_records SET lab_results_ready = 1, lab_results_ready_at = NOW() WHERE visit_id = ?");
+            $notifyStmt->bind_param('i', $visitRow['visit_id']);
+            $notifyStmt->execute();
         }
         logUserActivity($conn, $_SESSION['user_id'], 'Added Lab Result', "Added result for order ID: {$_POST['order_id']}");
-        $message = 'Lab result added successfully!';
+        $message = 'Lab result added successfully! Medical records notified.';
         header('Location: lab.php?message=' . urlencode($message));
         exit();
     } else {
@@ -133,7 +180,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 }
 
 // ============================================================================
-// GET LAB ORDERS
+// GET LAB ORDERS (GROUPED BY PATIENT/VISIT)
 // ============================================================================
 $searchTerm = isset($_GET['search']) ? sanitizeInput($_GET['search']) : '';
 $filterStatus = isset($_GET['status']) ? sanitizeInput($_GET['status']) : '';
@@ -144,7 +191,9 @@ $query = "SELECT lo.*,
           CONCAT(s.first_name, ' ', s.last_name) as ordered_by_name,
           CONCAT(p.first_name, ' ', p.last_name) as patient_name,
           p.patient_code,
-          v.visit_code
+          p.patient_id,
+          v.visit_code,
+          v.visit_id
           FROM lab_orders lo
           JOIN lookup_test_types vt ON lo.test_type_id = vt.test_type_id
           JOIN lookup_order_statuses os ON lo.order_status_id = os.order_status_id
@@ -171,7 +220,7 @@ if ($filterStatus && $filterStatus !== 'All') {
     $types .= "s";
 }
 
-$query .= " ORDER BY lo.ordered_at DESC LIMIT 50";
+$query .= " ORDER BY lo.ordered_at DESC LIMIT 100";
 
 $stmt = $conn->prepare($query);
 if (!empty($params)) {
@@ -179,6 +228,24 @@ if (!empty($params)) {
 }
 $stmt->execute();
 $labOrders = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+// Group orders by patient/visit
+$groupedOrders = [];
+foreach ($labOrders as $order) {
+    $key = $order['visit_id'];
+    if (!isset($groupedOrders[$key])) {
+        $groupedOrders[$key] = [
+            'visit_id' => $order['visit_id'],
+            'visit_code' => $order['visit_code'],
+            'patient_id' => $order['patient_id'],
+            'patient_name' => $order['patient_name'],
+            'patient_code' => $order['patient_code'],
+            'ordered_by_name' => $order['ordered_by_name'],
+            'tests' => []
+        ];
+    }
+    $groupedOrders[$key]['tests'][] = $order;
+}
 
 // Patients referred from medical records (needs lab)
 $pendingLabQuery = "SELECT mr.record_id, mr.visit_id, mr.diagnosis, mr.created_at,
@@ -588,84 +655,77 @@ if (!empty($labOrders)) {
                     <table class="recent-table">
                         <thead>
                             <tr>
-                                <th>Order ID</th>
                                 <th>Patient</th>
                                 <th>Visit</th>
-                                <th>Test</th>
-                                <th>Category</th>
+                                <th>Tests</th>
                                 <th>Ordered By</th>
                                 <th>Status</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            <?php if (empty($labOrders)): ?>
+                            <?php if (empty($groupedOrders)): ?>
                                 <tr>
-                                    <td colspan="8" style="text-align: center; color: #94a3b8; padding: 40px;">
+                                    <td colspan="6" style="text-align: center; color: #94a3b8; padding: 40px;">
                                         <i class="fas fa-flask" style="font-size: 32px; display: block; margin-bottom: 8px;"></i>
                                         No lab orders found
                                     </td>
                                 </tr>
                             <?php else: ?>
-                                <?php foreach ($labOrders as $order): ?>
+                                <?php foreach ($groupedOrders as $group): ?>
                                 <tr>
-                                    <td><strong>#<?php echo $order['order_id']; ?></strong></td>
                                     <td>
                                         <div class="patient-info">
-                                            <div class="avatar" style="background: <?php echo getUserColor($order['patient_name']); ?>; width: 32px; height: 32px; font-size: 12px;">
-                                                <?php echo strtoupper(substr($order['patient_name'], 0, 1)); ?>
+                                            <div class="avatar" style="background: <?php echo getUserColor($group['patient_name']); ?>; width: 32px; height: 32px; font-size: 12px;">
+                                                <?php echo strtoupper(substr($group['patient_name'], 0, 1)); ?>
                                             </div>
                                             <div>
-                                                <span class="patient-name"><?php echo htmlspecialchars($order['patient_name']); ?></span>
-                                                <small><?php echo htmlspecialchars($order['patient_code']); ?></small>
+                                                <span class="patient-name"><?php echo htmlspecialchars($group['patient_name']); ?></span>
+                                                <small><?php echo htmlspecialchars($group['patient_code']); ?></small>
                                             </div>
                                         </div>
                                     </td>
-                                    <td><?php echo htmlspecialchars($order['visit_code']); ?></td>
-                                    <td><?php echo htmlspecialchars($order['test_name']); ?></td>
-                                    <td><?php echo htmlspecialchars($order['category']); ?></td>
-                                    <td><?php echo htmlspecialchars($order['ordered_by_name']); ?></td>
+                                    <td><?php echo htmlspecialchars($group['visit_code']); ?></td>
                                     <td>
-                                        <span class="status-badge-lab status-<?php echo strtolower(str_replace(' ', '', $order['status_name'])); ?>">
-                                            <?php echo htmlspecialchars($order['status_name']); ?>
-                                        </span>
+                                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                                            <?php foreach ($group['tests'] as $test): ?>
+                                                <div style="font-size: 13px;">
+                                                    <?php echo htmlspecialchars($test['test_name']); ?>
+                                                    <span class="status-badge-lab status-<?php echo strtolower(str_replace(' ', '', $test['status_name'])); ?>" style="font-size: 10px; padding: 2px 6px;">
+                                                        <?php echo htmlspecialchars($test['status_name']); ?>
+                                                    </span>
+                                                </div>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    </td>
+                                    <td><?php echo htmlspecialchars($group['ordered_by_name']); ?></td>
+                                    <td>
+                                        <?php 
+                                        $allComplete = true;
+                                        $anyInProgress = false;
+                                        foreach ($group['tests'] as $test) {
+                                            if ($test['status_name'] !== 'Result Ready' && $test['status_name'] !== 'Reviewed') {
+                                                $allComplete = false;
+                                            }
+                                            if ($test['status_name'] === 'Ordered' || $test['status_name'] === 'Sample Collected') {
+                                                $anyInProgress = true;
+                                            }
+                                        }
+                                        if ($allComplete) {
+                                            echo '<span class="status-badge-lab status-resultready">Complete</span>';
+                                        } elseif ($anyInProgress) {
+                                            echo '<span class="status-badge-lab status-ordered">In Progress</span>';
+                                        } else {
+                                            echo '<span class="status-badge-lab status-reviewed">Reviewed</span>';
+                                        }
+                                        ?>
                                     </td>
                                     <td>
                                         <div class="action-buttons">
-                                            <?php if ($order['status_name'] === 'Ordered' || $order['status_name'] === 'Sample Collected'): ?>
-                                                <form method="POST" action="" style="display: inline;">
-                                                    <input type="hidden" name="action" value="update_status">
-                                                    <input type="hidden" name="order_id" value="<?php echo $order['order_id']; ?>">
-                                                    <select name="status_id" onchange="this.form.submit()" style="padding: 4px 8px; border-radius: 4px; border: 1px solid #e2e8f0; font-size: 12px;">
-                                                        <?php foreach ($orderStatuses as $status): ?>
-                                                            <option value="<?php echo $status['order_status_id']; ?>" <?php echo $status['order_status_id'] == $order['order_status_id'] ? 'selected' : ''; ?>>
-                                                                <?php echo $status['name']; ?>
-                                                            </option>
-                                                        <?php endforeach; ?>
-                                                    </select>
-                                                </form>
-                                            <?php endif; ?>
-                                            
-                                            <?php if ($order['status_name'] !== 'Result Ready' && $order['status_name'] !== 'Reviewed' && $order['status_name'] !== 'Cancelled'): ?>
-                                                <a href="lab.php?action=result&id=<?php echo $order['order_id']; ?>" class="btn-result">
-                                                    <i class="fas fa-plus"></i> Add Result
-                                                </a>
-                                            <?php endif; ?>
+                                            <a href="lab.php?action=view_grouped&visit_id=<?php echo $group['visit_id']; ?>" class="btn-result">
+                                                <i class="fas fa-eye"></i> View & Add Results
+                                            </a>
                                         </div>
-                                        
-                                        <?php if (isset($labResults[$order['order_id']])): ?>
-                                            <div class="result-box">
-                                                <?php foreach ($labResults[$order['order_id']] as $result): ?>
-                                                    <p><span class="result-label">Result:</span> <?php echo htmlspecialchars($result['result_value']); ?></p>
-                                                    <?php if ($result['result_notes']): ?>
-                                                        <p><span class="result-label">Notes:</span> <?php echo htmlspecialchars($result['result_notes']); ?></p>
-                                                    <?php endif; ?>
-                                                    <p style="font-size: 11px; color: #94a3b8;">
-                                                        Entered: <?php echo date('M d, Y g:i A', strtotime($result['entered_at'])); ?>
-                                                    </p>
-                                                <?php endforeach; ?>
-                                            </div>
-                                        <?php endif; ?>
                                     </td>
                                 </tr>
                                 <?php endforeach; ?>
@@ -676,6 +736,98 @@ if (!empty($labOrders)) {
             </div>
         </main>
     </div>
+
+    <!-- View Grouped Lab Results Modal -->
+    <?php if (isset($_GET['action']) && $_GET['action'] === 'view_grouped' && isset($_GET['visit_id'])): ?>
+    <?php
+    $visitId = intval($_GET['visit_id']);
+    $visitTestsQuery = "SELECT lo.*, vt.name as test_name, vt.category, os.name as status_name,
+                        lr.result_value, lr.result_notes, lr.entered_at,
+                        CONCAT(p.first_name, ' ', p.last_name) as patient_name,
+                        p.patient_code,
+                        v.visit_code
+                        FROM lab_orders lo
+                        JOIN lookup_test_types vt ON lo.test_type_id = vt.test_type_id
+                        JOIN lookup_order_statuses os ON lo.order_status_id = os.order_status_id
+                        JOIN visits v ON lo.visit_id = v.visit_id
+                        JOIN patients p ON v.patient_id = p.patient_id
+                        LEFT JOIN lab_results lr ON lo.order_id = lr.order_id
+                        WHERE lo.visit_id = ? AND vt.category = 'Laboratory'
+                        ORDER BY lo.ordered_at ASC";
+    $visitStmt = $conn->prepare($visitTestsQuery);
+    $visitStmt->bind_param('i', $visitId);
+    $visitStmt->execute();
+    $visitTests = $visitStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $visitInfo = !empty($visitTests) ? $visitTests[0] : null;
+    ?>
+    <div class="form-modal" style="display: flex;">
+        <div class="form-modal-content" style="max-width: 900px;">
+            <button class="close-btn" onclick="window.location.href='lab.php'">&times;</button>
+            <h2 style="margin-bottom: 24px;">Lab Results - <?php echo htmlspecialchars($visitInfo['patient_name'] ?? 'Patient'); ?></h2>
+            
+            <?php if ($visitInfo): ?>
+            <div style="background: #f8fafc; padding: 16px; border-radius: 8px; margin-bottom: 24px;">
+                <p><strong>Patient:</strong> <?php echo htmlspecialchars($visitInfo['patient_name']); ?> (<?php echo htmlspecialchars($visitInfo['patient_code']); ?>)</p>
+                <p><strong>Visit:</strong> <?php echo htmlspecialchars($visitInfo['visit_code']); ?></p>
+            </div>
+            
+            <form method="POST" action="">
+                <input type="hidden" name="action" value="add_bulk_results">
+                <input type="hidden" name="visit_id" value="<?php echo $visitId; ?>">
+                
+                <div style="display: flex; flex-direction: column; gap: 16px;">
+                    <?php foreach ($visitTests as $test): ?>
+                    <div style="background: #fff; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <h3 style="margin: 0; font-size: 16px;"><?php echo htmlspecialchars($test['test_name']); ?></h3>
+                            <span class="status-badge-lab status-<?php echo strtolower(str_replace(' ', '', $test['status_name'])); ?>">
+                                <?php echo htmlspecialchars($test['status_name']); ?>
+                            </span>
+                        </div>
+                        
+                        <?php if ($test['result_value']): ?>
+                        <div style="background: #f0fdf4; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+                            <p style="margin: 0;"><strong>Result:</strong> <?php echo htmlspecialchars($test['result_value']); ?></p>
+                            <?php if ($test['result_notes']): ?>
+                            <p style="margin: 4px 0 0 0;"><strong>Notes:</strong> <?php echo htmlspecialchars($test['result_notes']); ?></p>
+                            <?php endif; ?>
+                            <p style="margin: 4px 0 0 0; font-size: 12px; color: #64748b;">
+                                Entered: <?php echo date('M d, Y g:i A', strtotime($test['entered_at'])); ?>
+                            </p>
+                        </div>
+                        <?php else: ?>
+                        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                            <div style="flex: 1; min-width: 200px;">
+                                <label style="display: block; margin-bottom: 6px; font-weight: 500;">Result Value *</label>
+                                <input type="text" name="results[<?php echo $test['order_id']; ?>][value]" 
+                                       placeholder="Enter result..." 
+                                       style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                            </div>
+                            <div style="flex: 1; min-width: 200px;">
+                                <label style="display: block; margin-bottom: 6px; font-weight: 500;">Notes (Optional)</label>
+                                <input type="text" name="results[<?php echo $test['order_id']; ?>][notes]" 
+                                       placeholder="Additional notes..." 
+                                       style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                            </div>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+                
+                <div class="btn-group" style="margin-top: 24px;">
+                    <button type="submit" class="btn-submit">
+                        <i class="fas fa-save"></i> Save Results
+                    </button>
+                    <button type="button" class="btn-cancel" onclick="window.location.href='lab.php'">Cancel</button>
+                </div>
+            </form>
+            <?php else: ?>
+            <p style="text-align: center; color: #64748b; padding: 40px;">No lab tests found for this visit.</p>
+            <?php endif; ?>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <!-- Create Lab Order Modal -->
     <?php if (isset($_GET['action']) && $_GET['action'] === 'create'): ?>
@@ -719,18 +871,6 @@ if (!empty($labOrders)) {
                             </label>
                         <?php endforeach; ?>
                     </div>
-                </div>
-                
-                <div class="form-group">
-                    <label for="ordered_by">Ordering Doctor *</label>
-                    <select id="ordered_by" name="ordered_by" required>
-                        <option value="">Select Doctor</option>
-                        <?php foreach ($doctors as $doctor): ?>
-                            <option value="<?php echo $doctor['staff_id']; ?>">
-                                <?php echo htmlspecialchars($doctor['first_name'] . ' ' . $doctor['last_name']); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
                 </div>
                 
                 <div class="btn-group">

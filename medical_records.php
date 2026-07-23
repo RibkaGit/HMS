@@ -32,9 +32,6 @@ if ($selectedVisitId > 0) {
 // Get all patients for dropdown
 $patients = $conn->query("SELECT patient_id, patient_code, first_name, last_name FROM patients WHERE is_active = 1 ORDER BY first_name")->fetch_all(MYSQLI_ASSOC);
 
-// Get all doctors for dropdown
-$doctors = $conn->query("SELECT staff_id, first_name, last_name FROM staff WHERE role_id = (SELECT role_id FROM lookup_roles WHERE name = 'Doctor') AND is_active = 1")->fetch_all(MYSQLI_ASSOC);
-
 // Get all visits for dropdown
 $visits = $conn->query("SELECT v.visit_id, v.visit_code, CONCAT(p.first_name, ' ', p.last_name) as patient_name 
                         FROM visits v 
@@ -87,6 +84,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 // CREATE MEDICAL RECORD
 // ============================================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'create_record') {
+    $visitId = intval($_POST['visit_id']);
+    
+    // Get the attending doctor from the visit
+    $visitQuery = "SELECT attending_doctor_id, patient_id FROM visits WHERE visit_id = ?";
+    $visitStmt = $conn->prepare($visitQuery);
+    $visitStmt->bind_param('i', $visitId);
+    $visitStmt->execute();
+    $visit = $visitStmt->get_result()->fetch_assoc();
+    $doctorId = $visit['attending_doctor_id'] ? intval($visit['attending_doctor_id']) : null;
+    $patientId = intval($visit['patient_id']);
+    
     $needsLab = isset($_POST['needs_lab']) ? 1 : 0;
     $needsBed = isset($_POST['needs_bed']) ? 1 : 0;
     $needsRadiology = isset($_POST['needs_radiology']) ? 1 : 0;
@@ -94,9 +102,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
               VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
     $stmt = $conn->prepare($query);
     $stmt->bind_param('iiissiii', 
-        $_POST['visit_id'],
-        $_POST['patient_id'],
-        $_POST['doctor_id'],
+        $visitId,
+        $patientId,
+        $doctorId,
         $_POST['diagnosis'],
         $_POST['clinical_notes'],
         $needsLab,
@@ -230,6 +238,19 @@ $pendingRecordQuery = "SELECT mr.record_id, mr.visit_id, mr.diagnosis, mr.create
                        WHERE mr.created_at = (SELECT MIN(mr2.created_at) FROM medical_records mr2 WHERE mr2.visit_id = mr.visit_id)
                        ORDER BY mr.created_at ASC LIMIT 100";
 $pendingRecords = $conn->query($pendingRecordQuery)->fetch_all(MYSQLI_ASSOC);
+
+// Get records with lab results ready
+$labReadyQuery = "SELECT mr.record_id, mr.visit_id, mr.diagnosis, mr.lab_results_ready_at,
+                   CONCAT(p.first_name, ' ', p.last_name) as patient_name,
+                   p.patient_code, v.visit_code,
+                   CONCAT(d.first_name, ' ', d.last_name) as doctor_name
+                   FROM medical_records mr
+                   JOIN patients p ON mr.patient_id = p.patient_id
+                   JOIN visits v ON mr.visit_id = v.visit_id
+                   JOIN staff d ON mr.doctor_id = d.staff_id
+                   WHERE mr.lab_results_ready = 1
+                   ORDER BY mr.lab_results_ready_at DESC LIMIT 50";
+$labReadyRecords = $conn->query($labReadyQuery)->fetch_all(MYSQLI_ASSOC);
 
 // Get record for edit
 $editRecord = null;
@@ -690,6 +711,36 @@ if (isset($_GET['message'])) {
                 </button>
             </div>
 
+            <?php if (!empty($labReadyRecords)): ?>
+            <div class="table-card" style="border: 2px solid #22c55e; background: #f0fdf4;">
+                <details open>
+                    <summary style="cursor: pointer; padding: 14px 0; font-size: 18px; font-weight: 700; color: #16a34a;">
+                        <i class="fas fa-flask"></i> Lab Results Ready (<?php echo count($labReadyRecords); ?>)
+                    </summary>
+                    <div class="table-responsive">
+                        <table class="recent-table">
+                            <thead><tr><th>Patient</th><th>Visit</th><th>Doctor</th><th>Ready At</th><th>Action</th></tr></thead>
+                            <tbody>
+                                <?php foreach ($labReadyRecords as $record): ?>
+                                    <tr>
+                                        <td><strong><?php echo htmlspecialchars($record['patient_name']); ?></strong><br><small><?php echo htmlspecialchars($record['patient_code']); ?></small></td>
+                                        <td><?php echo htmlspecialchars($record['visit_code']); ?></td>
+                                        <td><?php echo htmlspecialchars($record['doctor_name']); ?></td>
+                                        <td><?php echo date('M d, Y g:i A', strtotime($record['lab_results_ready_at'])); ?></td>
+                                        <td>
+                                            <a href="lab.php?action=view_grouped&visit_id=<?php echo $record['visit_id']; ?>" class="btn-create-action" style="background: #22c55e;">
+                                                <i class="fas fa-eye"></i> View Results
+                                            </a>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </details>
+            </div>
+            <?php endif; ?>
+
             <div class="table-card">
                 <details open>
                     <summary style="cursor: pointer; padding: 14px 0; font-size: 18px; font-weight: 700; color: #1e293b;">
@@ -872,18 +923,6 @@ if (isset($_GET['message'])) {
                     <input type="hidden" name="patient_id" value="<?php echo $editRecord['patient_id']; ?>">
                     <input type="hidden" name="visit_id" value="<?php echo $editRecord['visit_id']; ?>">
                 <?php endif; ?>
-                
-                <div class="form-group">
-                    <label for="doctor_id">Doctor *</label>
-                    <select id="doctor_id" name="doctor_id" required>
-                        <option value="">Select Doctor</option>
-                        <?php foreach ($doctors as $doctor): ?>
-                            <option value="<?php echo $doctor['staff_id']; ?>" <?php echo (isset($editRecord['doctor_id']) && $editRecord['doctor_id'] == $doctor['staff_id']) ? 'selected' : ''; ?>>
-                                <?php echo htmlspecialchars($doctor['first_name'] . ' ' . $doctor['last_name']); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
                 
                 <div class="form-group">
                     <label for="diagnosis">Diagnosis</label>

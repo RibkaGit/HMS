@@ -67,7 +67,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $staffUser = $result->fetch_assoc();
             
             if ($staffUser) {
-                // Convert staff data to user-like array
+                // Convert staff data to user-like medical record assign below 
                 $user = [
                     'user_id' => $staffUser['staff_id'],
                     'username' => $staffUser['username'],
@@ -124,7 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     exit();
                 } else {
                     $error = 'Invalid password. Please try again.';
-                    // Log failed attempt
+                    // Log failed attempt "doctor asign to pati"
                     logUserActivity($conn, null, 'Failed Login', "Failed login attempt for username: {$username} - Incorrect password");
                 }
             }

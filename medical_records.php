@@ -227,21 +227,25 @@ if (!empty($params)) {
 $stmt->execute();
 $medicalRecords = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
-$pendingRecordQuery = "SELECT mr.record_id, mr.visit_id, mr.diagnosis, mr.created_at,
-                       CONCAT(p.first_name, ' ', p.last_name) as patient_name,
+$pendingRecordQuery = "SELECT 0 as record_id, v.visit_id, '' as diagnosis, MIN(vs.recorded_at) as created_at,
+                       p.patient_id, CONCAT(p.first_name, ' ', p.last_name) as patient_name,
                        p.patient_code, v.visit_code,
                        CONCAT(d.first_name, ' ', d.last_name) as doctor_name
-                       FROM medical_records mr
-                       JOIN patients p ON mr.patient_id = p.patient_id
-                       JOIN visits v ON mr.visit_id = v.visit_id
-                       JOIN staff d ON mr.doctor_id = d.staff_id
-                       WHERE mr.created_at = (SELECT MIN(mr2.created_at) FROM medical_records mr2 WHERE mr2.visit_id = mr.visit_id)
-                       ORDER BY mr.created_at ASC LIMIT 100";
+                       FROM visits v
+                       JOIN patients p ON v.patient_id = p.patient_id
+                       JOIN vital_signs vs ON v.visit_id = vs.visit_id
+                       LEFT JOIN staff d ON v.attending_doctor_id = d.staff_id
+                       LEFT JOIN medical_records mr ON v.visit_id = mr.visit_id
+                       JOIN lookup_visit_statuses lvs ON v.visit_status_id = lvs.visit_status_id
+                       WHERE mr.record_id IS NULL 
+                       AND lvs.name NOT IN ('Cancelled', 'Discharged')
+                       GROUP BY v.visit_id
+                       ORDER BY created_at ASC LIMIT 100";
 $pendingRecords = $conn->query($pendingRecordQuery)->fetch_all(MYSQLI_ASSOC);
 
 // Get records with lab results ready
 $labReadyQuery = "SELECT mr.record_id, mr.visit_id, mr.diagnosis, mr.lab_results_ready_at,
-                   CONCAT(p.first_name, ' ', p.last_name) as patient_name,
+                   p.patient_id, CONCAT(p.first_name, ' ', p.last_name) as patient_name,
                    p.patient_code, v.visit_code,
                    CONCAT(d.first_name, ' ', d.last_name) as doctor_name
                    FROM medical_records mr

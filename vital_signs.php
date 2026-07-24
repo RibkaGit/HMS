@@ -125,6 +125,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     );
     
     if ($stmt->execute()) {
+        // Assign doctor if selected
+        if (!empty($_POST['attending_doctor_id']) && !empty($_POST['visit_id'])) {
+            $doctorId = intval($_POST['attending_doctor_id']);
+            $visitIdToUpdate = intval($_POST['visit_id']);
+            $updateVisit = $conn->prepare("UPDATE visits SET attending_doctor_id = ? WHERE visit_id = ?");
+            $updateVisit->bind_param('ii', $doctorId, $visitIdToUpdate);
+            $updateVisit->execute();
+        }
+        
         logUserActivity($conn, $_SESSION['user_id'], 'Updated Vital Signs', "Updated vital signs ID: {$vitalId}");
         $message = 'Vital signs updated successfully!';
         header('Location: vital_signs.php?message=' . urlencode($message));
@@ -219,7 +228,11 @@ $vitalQueue = $conn->query($queueQuery)->fetch_all(MYSQLI_ASSOC);
 $editVital = null;
 if (isset($_GET['action']) && $_GET['action'] === 'edit_vital' && isset($_GET['id'])) {
     $vitalId = intval($_GET['id']);
-    $query = "SELECT * FROM vital_signs WHERE vital_id = ?";
+    $query = "SELECT vs.*, v.attending_doctor_id, v.visit_code, CONCAT(p.first_name, ' ', p.last_name) as patient_name, p.patient_code 
+              FROM vital_signs vs
+              JOIN visits v ON vs.visit_id = v.visit_id
+              JOIN patients p ON v.patient_id = p.patient_id
+              WHERE vs.vital_id = ?";
     $stmt = $conn->prepare($query);
     $stmt->bind_param('i', $vitalId);
     $stmt->execute();
@@ -701,21 +714,32 @@ $stats = $statsResult->fetch_assoc();
                     <input type="hidden" name="vital_id" value="<?php echo $editVital['vital_id']; ?>">
                 <?php endif; ?>
                 
-                <?php if (!$editVital): ?>
+                <?php if ($editVital): ?>
+                    <input type="hidden" name="vital_id" value="<?php echo $editVital['vital_id']; ?>">
+                <?php endif; ?>
+                
                 <div class="form-row">
                     <div class="form-group">
                         <label for="visit_id">Visit *</label>
-                        <?php foreach ($visits as $visit): if ((int) $visit['visit_id'] === $selectedVisitId): ?>
-                            <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
-                            <input type="text" value="<?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['patient_name'] . ' (' . $visit['patient_code'] . ')'); ?>" readonly>
-                        <?php endif; endforeach; ?>
+                        <?php if ($editVital): ?>
+                            <input type="hidden" name="visit_id" value="<?php echo $editVital['visit_id']; ?>">
+                            <input type="text" value="<?php echo htmlspecialchars($editVital['visit_code'] . ' - ' . $editVital['patient_name'] . ' (' . $editVital['patient_code'] . ')'); ?>" readonly>
+                        <?php else: ?>
+                            <?php foreach ($visits as $visit): if ((int) $visit['visit_id'] === $selectedVisitId): ?>
+                                <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
+                                <input type="text" value="<?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['patient_name'] . ' (' . $visit['patient_code'] . ')'); ?>" readonly>
+                            <?php endif; endforeach; ?>
+                        <?php endif; ?>
                     </div>
                     <div class="form-group">
                         <label for="recorded_by">Recorded By</label>
                         <select id="recorded_by" name="recorded_by">
                             <option value="">Select Staff</option>
-                            <?php foreach ($staff as $person): ?>
-                                <option value="<?php echo $person['staff_id']; ?>" <?php echo ($_SESSION['user_id'] == $person['staff_id']) ? 'selected' : ''; ?>>
+                            <?php 
+                            $currentRecorder = $editVital ? $editVital['recorded_by'] : $_SESSION['user_id'];
+                            foreach ($staff as $person): 
+                            ?>
+                                <option value="<?php echo $person['staff_id']; ?>" <?php echo ($currentRecorder == $person['staff_id']) ? 'selected' : ''; ?>>
                                     <?php echo htmlspecialchars($person['first_name'] . ' ' . $person['last_name'] . ' (' . $person['role_name'] . ')'); ?>
                                 </option>
                             <?php endforeach; ?>
@@ -726,17 +750,16 @@ $stats = $statsResult->fetch_assoc();
                     <label for="attending_doctor_id">Assign Doctor</label>
                     <select id="attending_doctor_id" name="attending_doctor_id">
                         <option value="">-- Select Doctor --</option>
-                        <?php foreach ($doctors as $doctor): ?>
-                            <option value="<?php echo $doctor['staff_id']; ?>">
+                        <?php 
+                        $currentDoctor = $editVital ? $editVital['attending_doctor_id'] : '';
+                        foreach ($doctors as $doctor): 
+                        ?>
+                            <option value="<?php echo $doctor['staff_id']; ?>" <?php echo ($currentDoctor == $doctor['staff_id']) ? 'selected' : ''; ?>>
                                 <?php echo htmlspecialchars($doctor['first_name'] . ' ' . $doctor['last_name']); ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
                 </div>
-                <?php else: ?>
-                    <input type="hidden" name="visit_id" value="<?php echo $editVital['visit_id']; ?>">
-                    <input type="hidden" name="recorded_by" value="<?php echo $editVital['recorded_by']; ?>">
-                <?php endif; ?>
                 
                 <div class="form-row-3">
                     <div class="form-group">

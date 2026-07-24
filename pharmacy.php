@@ -25,9 +25,10 @@ $selectedVisitId = isset($_GET['visit_id']) ? intval($_GET['visit_id']) : 0;
 $medications = $conn->query("SELECT * FROM medications WHERE is_active = 1 ORDER BY name")->fetch_all(MYSQLI_ASSOC);
 
 // Get visits for prescription
-$visits = $conn->query("SELECT v.visit_id, v.visit_code, p.first_name, p.last_name 
+$visits = $conn->query("SELECT v.visit_id, v.visit_code, v.attending_doctor_id, p.first_name, p.last_name, d.first_name as doc_first, d.last_name as doc_last
                         FROM visits v 
                         JOIN patients p ON v.patient_id = p.patient_id 
+                        LEFT JOIN staff d ON v.attending_doctor_id = d.staff_id
                         WHERE v.visit_status_id != (SELECT visit_status_id FROM lookup_visit_statuses WHERE name = 'Discharged')
                         ORDER BY v.admitted_at DESC LIMIT 100")->fetch_all(MYSQLI_ASSOC);
 
@@ -131,6 +132,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             }
         }
         
+        $clearPharmacyFlag = $conn->prepare("UPDATE medical_records SET needs_pharmacy = 0 WHERE visit_id = ?");
+        $clearPharmacyFlag->bind_param('i', $data['visit_id']);
+        $clearPharmacyFlag->execute();
+        
         logUserActivity($conn, $_SESSION['user_id'], 'Created Prescription', "Created prescription ID: {$prescriptionId}");
         $message = 'Prescription created successfully!';
         header('Location: pharmacy.php?message=' . urlencode($message));
@@ -223,7 +228,7 @@ if ($filterStatus && $filterStatus !== 'All') {
     $types .= "s";
 }
 
-$query .= " ORDER BY p.prescribed_at DESC LIMIT 50";
+$query .= " ORDER BY p.prescribed_at ASC LIMIT 50";
 
 $stmt = $conn->prepare($query);
 if (!empty($params)) {
@@ -264,6 +269,20 @@ if (isset($_GET['message'])) {
 
 // Get low stock medications
 $lowStock = $conn->query("SELECT * FROM medications WHERE stock_quantity <= reorder_level AND is_active = 1 ORDER BY stock_quantity ASC")->fetch_all(MYSQLI_ASSOC);
+
+// Patients referred from medical records (needs pharmacy)
+$pendingPharmacyQuery = "SELECT mr.record_id, mr.visit_id, mr.diagnosis, mr.created_at,
+                           CONCAT(p.first_name, ' ', p.last_name) as patient_name,
+                           p.patient_code,
+                           v.visit_code,
+                           CONCAT(d.first_name, ' ', d.last_name) as doctor_name
+                    FROM medical_records mr
+                    JOIN patients p ON mr.patient_id = p.patient_id
+                    JOIN visits v ON mr.visit_id = v.visit_id
+                    JOIN staff d ON mr.doctor_id = d.staff_id
+                    WHERE mr.needs_pharmacy = 1
+                    ORDER BY mr.created_at ASC";
+$pendingPharmacyPatients = $conn->query($pendingPharmacyQuery)->fetch_all(MYSQLI_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -669,6 +688,36 @@ $lowStock = $conn->query("SELECT * FROM medications WHERE stock_quantity <= reor
             </div>
             <?php endif; ?>
 
+            <?php if (!empty($pendingPharmacyPatients)): ?>
+            <div class="table-card" style="border: 2px solid #3b82f6; background: #eff6ff; margin-bottom: 24px;">
+                <details open>
+                    <summary style="cursor: pointer; padding: 14px 0; font-size: 18px; font-weight: 700; color: #1d4ed8;">
+                        <i class="fas fa-prescription"></i> Waiting for Pharmacy (<?php echo count($pendingPharmacyPatients); ?>)
+                    </summary>
+                    <div class="table-responsive">
+                        <table class="recent-table">
+                            <thead><tr><th>Patient</th><th>Visit</th><th>Doctor</th><th>Sent At</th><th>Action</th></tr></thead>
+                            <tbody>
+                                <?php foreach ($pendingPharmacyPatients as $record): ?>
+                                    <tr>
+                                        <td><strong><?php echo htmlspecialchars($record['patient_name']); ?></strong><br><small><?php echo htmlspecialchars($record['patient_code']); ?></small></td>
+                                        <td><?php echo htmlspecialchars($record['visit_code']); ?></td>
+                                        <td><?php echo htmlspecialchars($record['doctor_name']); ?></td>
+                                        <td><?php echo date('M d, Y g:i A', strtotime($record['created_at'])); ?></td>
+                                        <td>
+                                            <a href="pharmacy.php?action=create_prescription&visit_id=<?php echo $record['visit_id']; ?>" class="btn-create" style="padding: 6px 12px; font-size: 13px;">
+                                                <i class="fas fa-pills"></i> Create Prescription
+                                            </a>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </details>
+            </div>
+            <?php endif; ?>
+
             <!-- Tabs -->
             <div class="tabs">
                 <button class="tab active" data-tab="prescriptions">Prescriptions</button>
@@ -994,14 +1043,40 @@ $lowStock = $conn->query("SELECT * FROM medications WHERE stock_quantity <= reor
                     </div>
                     <div class="form-group">
                         <label for="prescribed_by">Prescribing Doctor *</label>
-                        <select id="prescribed_by" name="prescribed_by" required>
-                            <option value="">Select Doctor</option>
-                            <?php foreach ($doctors as $doctor): ?>
-                                <option value="<?php echo $doctor['staff_id']; ?>">
-                                    <?php echo htmlspecialchars($doctor['first_name'] . ' ' . $doctor['last_name']); ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
+                        <?php if ($selectedVisitId > 0): 
+                            $assignedDoctorId = 0;
+                            $assignedDoctorName = 'Select Doctor';
+                            foreach ($visits as $visit) {
+                                if ((int) $visit['visit_id'] === $selectedVisitId && !empty($visit['attending_doctor_id'])) {
+                                    $assignedDoctorId = $visit['attending_doctor_id'];
+                                    $assignedDoctorName = 'Dr. ' . $visit['doc_first'] . ' ' . $visit['doc_last'];
+                                    break;
+                                }
+                            }
+                        ?>
+                            <?php if ($assignedDoctorId > 0): ?>
+                                <input type="hidden" name="prescribed_by" value="<?php echo $assignedDoctorId; ?>">
+                                <input type="text" value="<?php echo htmlspecialchars($assignedDoctorName); ?>" readonly>
+                            <?php else: ?>
+                                <select id="prescribed_by" name="prescribed_by" required>
+                                    <option value="">Select Doctor</option>
+                                    <?php foreach ($doctors as $doctor): ?>
+                                        <option value="<?php echo $doctor['staff_id']; ?>">
+                                            <?php echo htmlspecialchars($doctor['first_name'] . ' ' . $doctor['last_name']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            <?php endif; ?>
+                        <?php else: ?>
+                            <select id="prescribed_by" name="prescribed_by" required>
+                                <option value="">Select Doctor</option>
+                                <?php foreach ($doctors as $doctor): ?>
+                                    <option value="<?php echo $doctor['staff_id']; ?>">
+                                        <?php echo htmlspecialchars($doctor['first_name'] . ' ' . $doctor['last_name']); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        <?php endif; ?>
                     </div>
                 </div>
                 

@@ -153,6 +153,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 }
 
 // ============================================================================
+// ACKNOWLEDGE LAB RESULTS (DOCTOR)
+// ============================================================================
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'acknowledge_results') {
+    $visitId = intval($_POST['visit_id']);
+    
+    // Clear the lab_results_ready flag in medical_records
+    $ackStmt = $conn->prepare("UPDATE medical_records SET lab_results_ready = 0 WHERE visit_id = ?");
+    $ackStmt->bind_param('i', $visitId);
+    if ($ackStmt->execute()) {
+        logUserActivity($conn, $_SESSION['user_id'], 'Acknowledged Lab Results', "Acknowledged lab results for visit ID: {$visitId}");
+        $message = 'Lab results acknowledged successfully.';
+        header('Location: medical_records.php?message=' . urlencode($message));
+        exit();
+    } else {
+        $error = 'Failed to acknowledge lab results. Please try again.';
+    }
+}
+
+// ============================================================================
 // ADD LAB RESULT (SINGLE)
 // ============================================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add_result') {
@@ -226,7 +245,7 @@ if ($filterStatus && $filterStatus !== 'All') {
     $types .= "s";
 }
 
-$query .= " ORDER BY lo.ordered_at DESC LIMIT 100";
+$query .= " ORDER BY lo.ordered_at ASC LIMIT 100";
 
 $stmt = $conn->prepare($query);
 if (!empty($params)) {
@@ -264,7 +283,7 @@ $pendingLabQuery = "SELECT mr.record_id, mr.visit_id, mr.diagnosis, mr.created_a
                     JOIN visits v ON mr.visit_id = v.visit_id
                     JOIN staff d ON mr.doctor_id = d.staff_id
                     WHERE mr.needs_lab = 1
-                    ORDER BY mr.created_at DESC";
+                    ORDER BY mr.created_at ASC";
 $pendingLabPatients = $conn->query($pendingLabQuery)->fetch_all(MYSQLI_ASSOC);
 
 if (isset($_GET['message'])) {
@@ -697,6 +716,9 @@ if (!empty($labOrders)) {
                                             <?php foreach ($group['tests'] as $test): ?>
                                                 <div style="font-size: 13px;">
                                                     <?php echo htmlspecialchars($test['test_name']); ?>
+                                                    <?php if(!empty($test['sample_id'])): ?>
+                                                        <span style="color: #64748b; font-size: 11px; margin-left: 4px;">(<?php echo htmlspecialchars($test['sample_id']); ?>)</span>
+                                                    <?php endif; ?>
                                                     <span class="status-badge-lab status-<?php echo strtolower(str_replace(' ', '', $test['status_name'])); ?>" style="font-size: 10px; padding: 2px 6px;">
                                                         <?php echo htmlspecialchars($test['status_name']); ?>
                                                     </span>
@@ -785,7 +807,12 @@ if (!empty($labOrders)) {
                     <?php foreach ($visitTests as $test): ?>
                     <div style="background: #fff; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                            <h3 style="margin: 0; font-size: 16px;"><?php echo htmlspecialchars($test['test_name']); ?></h3>
+                            <h3 style="margin: 0; font-size: 16px;">
+                                <?php echo htmlspecialchars($test['test_name']); ?>
+                                <?php if(!empty($test['sample_id'])): ?>
+                                    <span style="color: #64748b; font-size: 12px; margin-left: 8px;">Sample ID: <?php echo htmlspecialchars($test['sample_id']); ?></span>
+                                <?php endif; ?>
+                            </h3>
                             <span class="status-badge-lab status-<?php echo strtolower(str_replace(' ', '', $test['status_name'])); ?>">
                                 <?php echo htmlspecialchars($test['status_name']); ?>
                             </span>
@@ -822,10 +849,17 @@ if (!empty($labOrders)) {
                 </div>
                 
                 <div class="btn-group" style="margin-top: 24px;">
-                    <button type="submit" class="btn-submit">
-                        <i class="fas fa-save"></i> Save Results
-                    </button>
-                    <button type="button" class="btn-cancel" onclick="window.location.href='lab.php'">Cancel</button>
+                    <?php if (isset($_GET['from']) && $_GET['from'] === 'medical_records'): ?>
+                        <button type="submit" class="btn-submit" onclick="this.form.elements['action'].value='acknowledge_results';">
+                            <i class="fas fa-check-circle"></i> Acknowledge Results
+                        </button>
+                        <button type="button" class="btn-cancel" onclick="window.location.href='medical_records.php'">Cancel</button>
+                    <?php else: ?>
+                        <button type="submit" class="btn-submit">
+                            <i class="fas fa-save"></i> Save Results
+                        </button>
+                        <button type="button" class="btn-cancel" onclick="window.location.href='lab.php'">Cancel</button>
+                    <?php endif; ?>
                 </div>
             </form>
             <?php else: ?>

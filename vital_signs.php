@@ -202,7 +202,7 @@ if ($visitFilter > 0) {
     $types .= "i";
 }
 
-$query .= " ORDER BY vs.recorded_at DESC LIMIT 100";
+$query .= " ORDER BY vs.recorded_at ASC LIMIT 100";
 
 $stmt = $conn->prepare($query);
 if (!empty($params)) {

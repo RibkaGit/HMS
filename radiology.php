@@ -271,7 +271,7 @@ if ($filterStatus && $filterStatus !== 'All') {
     $types .= "s";
 }
 
-$query .= " ORDER BY lo.ordered_at DESC LIMIT 50";
+$query .= " ORDER BY lo.ordered_at ASC LIMIT 50";
 
 $stmt = $conn->prepare($query);
 if (!empty($params)) {
@@ -309,7 +309,7 @@ $pendingRadiologyQuery = "SELECT mr.record_id, mr.visit_id, mr.diagnosis, mr.cre
                     JOIN visits v ON mr.visit_id = v.visit_id
                     JOIN staff d ON mr.doctor_id = d.staff_id
                     WHERE mr.needs_radiology = 1
-                    ORDER BY mr.created_at DESC";
+                    ORDER BY mr.created_at ASC";
 $pendingRadiologyPatients = $conn->query($pendingRadiologyQuery)->fetch_all(MYSQLI_ASSOC);
 
 if (isset($_GET['message'])) {

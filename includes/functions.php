@@ -669,10 +669,14 @@ function generateRandomString($length = 8) {
 
 function generatePatientCode($conn) {
     $year = date('Y');
-    $query = "SELECT COUNT(*) as total FROM patients WHERE YEAR(registered_at) = YEAR(CURDATE())";
+    // Extract the numeric part of the patient code, handle cases where no patients exist for the year
+    $query = "SELECT MAX(CAST(SUBSTRING_INDEX(patient_code, '-', -1) AS UNSIGNED)) as max_num 
+              FROM patients 
+              WHERE patient_code LIKE 'PT-{$year}-%'";
     $result = $conn->query($query);
     $row = $result->fetch_assoc();
-    $number = str_pad($row['total'] + 1, 6, '0', STR_PAD_LEFT);
+    $maxNum = $row['max_num'] ? (int)$row['max_num'] : 0;
+    $number = str_pad($maxNum + 1, 6, '0', STR_PAD_LEFT);
     return "PT-{$year}-{$number}";
 }
 
@@ -737,10 +741,13 @@ function createPatient($conn, $data) {
 
 function generateVisitCode($conn) {
     $year = date('Y');
-    $query = "SELECT COUNT(*) as total FROM visits WHERE YEAR(admitted_at) = YEAR(CURDATE())";
+    $query = "SELECT MAX(CAST(SUBSTRING_INDEX(visit_code, '-', -1) AS UNSIGNED)) as max_num 
+              FROM visits 
+              WHERE visit_code LIKE 'VS-{$year}-%'";
     $result = $conn->query($query);
     $row = $result->fetch_assoc();
-    $number = str_pad($row['total'] + 1, 6, '0', STR_PAD_LEFT);
+    $maxNum = $row['max_num'] ? (int)$row['max_num'] : 0;
+    $number = str_pad($maxNum + 1, 6, '0', STR_PAD_LEFT);
     return "VS-{$year}-{$number}";
 }
 
@@ -887,10 +894,13 @@ function queueAppointmentSms($conn, $appointmentId) {
 
 function generateInvoiceCode($conn) {
     $year = date('Y');
-    $query = "SELECT COUNT(*) as total FROM invoices WHERE YEAR(created_at) = YEAR(CURDATE())";
+    $query = "SELECT MAX(CAST(SUBSTRING_INDEX(invoice_code, '-', -1) AS UNSIGNED)) as max_num 
+              FROM invoices 
+              WHERE invoice_code LIKE 'INV-{$year}-%'";
     $result = $conn->query($query);
     $row = $result->fetch_assoc();
-    $number = str_pad($row['total'] + 1, 6, '0', STR_PAD_LEFT);
+    $maxNum = $row['max_num'] ? (int)$row['max_num'] : 0;
+    $number = str_pad($maxNum + 1, 6, '0', STR_PAD_LEFT);
     return "INV-{$year}-{$number}";
 }
 
@@ -994,15 +1004,17 @@ function isVisitPaid($conn, $visitId) {
 // ============================================================================
 
 function createLabOrder($conn, $data) {
+    $sampleId = generateSampleId($conn);
     $query = "INSERT INTO lab_orders (visit_id, test_type_id, ordered_by, 
-              order_status_id) 
-              VALUES (?, ?, ?, ?)";
+              order_status_id, sample_id) 
+              VALUES (?, ?, ?, ?, ?)";
     $stmt = $conn->prepare($query);
-    $stmt->bind_param('iiii', 
+    $stmt->bind_param('iiiis', 
         $data['visit_id'],
         $data['test_type_id'],
         $data['ordered_by'],
-        $data['order_status_id']
+        $data['order_status_id'],
+        $sampleId
     );
     
     if ($stmt->execute()) {
@@ -1027,25 +1039,39 @@ function getLabOrdersByVisit($conn, $visitId) {
     return $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 }
 
-function updateLabResult($conn, $orderId, $resultData) {
+function updateLabResult($conn, $orderId, $data) {
+    // Add result to lab_results
     $query = "INSERT INTO lab_results (order_id, entered_by, result_value, result_notes) 
               VALUES (?, ?, ?, ?)";
     $stmt = $conn->prepare($query);
     $stmt->bind_param('iiss', 
-        $orderId,
-        $resultData['entered_by'],
-        $resultData['result_value'],
-        $resultData['result_notes']
+        $orderId, 
+        $data['entered_by'], 
+        $data['result_value'], 
+        $data['result_notes']
     );
     
     if ($stmt->execute()) {
+        // Update order status to Result Ready
         $statusId = getLookupId($conn, 'lookup_order_statuses', 'name', 'Result Ready');
-        $query = "UPDATE lab_orders SET order_status_id = ? WHERE order_id = ?";
-        $stmt = $conn->prepare($query);
-        $stmt->bind_param('ii', $statusId, $orderId);
-        return $stmt->execute();
+        $updateQuery = "UPDATE lab_orders SET order_status_id = ? WHERE order_id = ?";
+        $updateStmt = $conn->prepare($updateQuery);
+        $updateStmt->bind_param('ii', $statusId, $orderId);
+        return $updateStmt->execute();
     }
     return false;
+}
+
+function generateSampleId($conn) {
+    $year = date('y');
+    $query = "SELECT MAX(CAST(SUBSTRING_INDEX(sample_id, '-', -1) AS UNSIGNED)) as max_num 
+              FROM lab_orders 
+              WHERE sample_id LIKE 'SMP-{$year}-%'";
+    $result = $conn->query($query);
+    $row = $result->fetch_assoc();
+    $maxNum = $row['max_num'] ? (int)$row['max_num'] : 0;
+    $number = str_pad($maxNum + 1, 4, '0', STR_PAD_LEFT);
+    return "SMP-{$year}-{$number}";
 }
 
 // ============================================================================

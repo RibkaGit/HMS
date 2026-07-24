@@ -61,7 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $flag = $_POST['flag'] ?? '';
     $value = isset($_POST['value']) && $_POST['value'] === '1' ? 1 : 0;
 
-    if ($recordId <= 0 || !in_array($flag, ['needs_lab', 'needs_radiology', 'needs_bed'], true)) {
+    if ($recordId <= 0 || !in_array($flag, ['needs_lab', 'needs_radiology', 'needs_bed', 'needs_pharmacy'], true)) {
         echo json_encode(['success' => false, 'error' => 'Invalid request']);
         exit();
     }
@@ -98,10 +98,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $needsLab = isset($_POST['needs_lab']) ? 1 : 0;
     $needsBed = isset($_POST['needs_bed']) ? 1 : 0;
     $needsRadiology = isset($_POST['needs_radiology']) ? 1 : 0;
-    $query = "INSERT INTO medical_records (visit_id, patient_id, doctor_id, diagnosis, clinical_notes, needs_lab, needs_radiology, needs_bed) 
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+    $needsPharmacy = isset($_POST['needs_pharmacy']) ? 1 : 0;
+    $query = "INSERT INTO medical_records (visit_id, patient_id, doctor_id, diagnosis, clinical_notes, needs_lab, needs_radiology, needs_bed, needs_pharmacy) 
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
     $stmt = $conn->prepare($query);
-    $stmt->bind_param('iiissiii', 
+    $stmt->bind_param('iiissiiii', 
         $visitId,
         $patientId,
         $doctorId,
@@ -109,7 +110,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $_POST['clinical_notes'],
         $needsLab,
         $needsRadiology,
-        $needsBed
+        $needsBed,
+        $needsPharmacy
     );
     
     if ($stmt->execute()) {
@@ -218,7 +220,7 @@ if ($patientFilter > 0) {
     $types .= "i";
 }
 
-$query .= " ORDER BY mr.created_at DESC LIMIT 100";
+$query .= " ORDER BY mr.created_at ASC LIMIT 100";
 
 $stmt = $conn->prepare($query);
 if (!empty($params)) {
@@ -253,7 +255,7 @@ $labReadyQuery = "SELECT mr.record_id, mr.visit_id, mr.diagnosis, mr.lab_results
                    JOIN visits v ON mr.visit_id = v.visit_id
                    JOIN staff d ON mr.doctor_id = d.staff_id
                    WHERE mr.lab_results_ready = 1
-                   ORDER BY mr.lab_results_ready_at DESC LIMIT 50";
+                   ORDER BY mr.lab_results_ready_at ASC LIMIT 50";
 $labReadyRecords = $conn->query($labReadyQuery)->fetch_all(MYSQLI_ASSOC);
 
 // Get record for edit
@@ -732,7 +734,7 @@ if (isset($_GET['message'])) {
                                         <td><?php echo htmlspecialchars($record['doctor_name']); ?></td>
                                         <td><?php echo date('M d, Y g:i A', strtotime($record['lab_results_ready_at'])); ?></td>
                                         <td>
-                                            <a href="lab.php?action=view_grouped&visit_id=<?php echo $record['visit_id']; ?>" class="btn-create-action" style="background: #22c55e;">
+                                            <a href="lab.php?action=view_grouped&visit_id=<?php echo $record['visit_id']; ?>&from=medical_records" class="btn-create-action" style="background: #22c55e;">
                                                 <i class="fas fa-eye"></i> View Results
                                             </a>
                                         </td>
@@ -853,6 +855,14 @@ if (isset($_GET['message'])) {
                                                     <span><i class="fas fa-bed"></i> Bed</span>
                                                 <?php endif; ?>
                                             </label>
+                                            <label class="referral-toggle <?php echo !empty($record['needs_pharmacy']) ? 'checked-pharmacy' : ''; ?>" title="Mark patient for pharmacy medicine">
+                                                <input type="checkbox" class="flag-toggle" data-record-id="<?php echo $record['record_id']; ?>" data-flag="needs_pharmacy" <?php echo !empty($record['needs_pharmacy']) ? 'checked' : ''; ?>>
+                                                <?php if (!empty($record['needs_pharmacy']) && $record['visit_id']): ?>
+                                                    <a href="pharmacy.php?visit_id=<?php echo $record['visit_id']; ?>" title="Open pharmacy"><i class="fas fa-pills"></i> Pharmacy</a>
+                                                <?php else: ?>
+                                                    <span><i class="fas fa-pills"></i> Pharmacy</span>
+                                                <?php endif; ?>
+                                            </label>
                                             <button type="button" class="btn-history" data-patient-id="<?php echo $record['patient_id']; ?>" data-patient-name="<?php echo htmlspecialchars($record['patient_name']); ?>">
                                                 <i class="fas fa-clock-rotate-left"></i> History
                                             </button>
@@ -930,7 +940,7 @@ if (isset($_GET['message'])) {
                 
                 <div class="form-group">
                     <label for="diagnosis">Diagnosis</label>
-                    <input type="text" id="diagnosis" name="diagnosis" value="<?php echo htmlspecialchars($editRecord['diagnosis'] ?? ''); ?>" placeholder="e.g., Acute Bronchitis, Hypertension">
+                    <textarea id="diagnosis" name="diagnosis" rows="2" style="width: 100%;" placeholder="e.g., Acute Bronchitis, Hypertension"><?php echo htmlspecialchars($editRecord['diagnosis'] ?? ''); ?></textarea>
                 </div>
                 
                 <div class="form-group">
@@ -952,6 +962,10 @@ if (isset($_GET['message'])) {
                     <label style="display: block; margin-top: 8px; font-weight: 400;">
                         <input type="checkbox" name="needs_bed" value="1">
                         Patient needs bed assignment
+                    </label>
+                    <label style="display: block; margin-top: 8px; font-weight: 400;">
+                        <input type="checkbox" name="needs_pharmacy" value="1">
+                        Patient needs pharmacy medicine
                     </label>
                 </div>
                 <?php endif; ?>

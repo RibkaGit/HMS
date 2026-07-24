@@ -723,7 +723,7 @@ $stats = $statsResult->fetch_assoc();
                     </div>
                 </div>
                 <div class="form-group">
-                    <label for="attending_doctor_id">Assign Doctor (Optional)</label>
+                    <label for="attending_doctor_id">Assign Doctor</label>
                     <select id="attending_doctor_id" name="attending_doctor_id">
                         <option value="">-- Select Doctor --</option>
                         <?php foreach ($doctors as $doctor): ?>

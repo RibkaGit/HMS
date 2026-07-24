@@ -27,8 +27,14 @@ $visits = $conn->query("SELECT v.visit_id, v.visit_code, p.first_name, p.last_na
                         JOIN patients p ON v.patient_id = p.patient_id 
                         ORDER BY v.admitted_at DESC LIMIT 100")->fetch_all(MYSQLI_ASSOC);
 
-// Get test types
-$testTypes = $conn->query("SELECT * FROM lookup_test_types WHERE is_active = 1 AND category = 'Laboratory'")->fetch_all(MYSQLI_ASSOC);
+// Get test types and group them
+$testTypesQuery = $conn->query("SELECT * FROM lookup_test_types WHERE is_active = 1 AND category = 'Laboratory' ORDER BY sub_category, name");
+$testTypes = $testTypesQuery ? $testTypesQuery->fetch_all(MYSQLI_ASSOC) : [];
+$labCategories = [];
+foreach ($testTypes as $test) {
+    $sub = !empty($test['sub_category']) ? $test['sub_category'] : 'Other';
+    $labCategories[$sub][] = $test;
+}
 
 // Get order statuses
 $orderStatuses = $conn->query("SELECT * FROM lookup_order_statuses")->fetch_all(MYSQLI_ASSOC);
@@ -863,12 +869,19 @@ if (!empty($labOrders)) {
                 
                 <div class="form-group">
                     <label>Tests needed for this patient *</label>
-                    <div class="test-checklist">
-                        <?php foreach ($testTypes as $test): ?>
-                            <label style="display: block; margin: 8px 0;">
-                                <input type="checkbox" name="test_type_ids[]" value="<?php echo $test['test_type_id']; ?>">
-                                <?php echo htmlspecialchars($test['name'] . ' (' . $test['category'] . ') - $' . number_format($test['price'], 2)); ?>
-                            </label>
+                    <div class="test-categories-container" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px;">
+                        <?php foreach ($labCategories as $subCat => $tests): ?>
+                            <div class="test-category-card" style="background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                                <h4 style="margin-top: 0; margin-bottom: 8px; color: #1e293b; font-size: 14px; border-bottom: 2px solid #cbd5e1; padding-bottom: 4px;"><?php echo htmlspecialchars($subCat); ?></h4>
+                                <div class="test-checklist" style="max-height: 200px; overflow-y: auto;">
+                                    <?php foreach ($tests as $test): ?>
+                                        <label style="display: flex; align-items: flex-start; gap: 8px; margin: 6px 0; font-size: 13px; cursor: pointer;">
+                                            <input type="checkbox" name="test_type_ids[]" value="<?php echo $test['test_type_id']; ?>" style="margin-top: 2px; width: auto;">
+                                            <span><?php echo htmlspecialchars($test['name']); ?> <br><small style="color:#64748b;">Birr <?php echo number_format($test['price'], 2); ?></small></span>
+                                        </label>
+                                    <?php endforeach; ?>
+                                </div>
+                            </div>
                         <?php endforeach; ?>
                     </div>
                 </div>

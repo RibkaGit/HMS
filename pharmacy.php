@@ -850,7 +850,7 @@ $lowStock = $conn->query("SELECT * FROM medications WHERE stock_quantity <= reor
                                         <td><strong><?php echo htmlspecialchars($med['name']); ?></strong></td>
                                         <td><?php echo htmlspecialchars($med['strength'] ?? 'N/A'); ?></td>
                                         <td><?php echo htmlspecialchars($med['unit']); ?></td>
-                                        <td>$<?php echo number_format($med['unit_price'], 2); ?></td>
+                                        <td>Birr <?php echo number_format($med['unit_price'], 2); ?></td>
                                         <td>
                                             <?php 
                                             $stockClass = 'stock-high';

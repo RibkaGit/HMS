@@ -442,16 +442,16 @@ $monthlyRevenue = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
                 <div class="report-card">
                     <div class="report-title">Revenue</div>
-                    <div class="report-value">$<?php echo number_format($revenueStats['total_revenue'] ?? 0, 2); ?></div>
+                    <div class="report-value">Birr <?php echo number_format($revenueStats['total_revenue'] ?? 0, 2); ?></div>
                     <div class="report-sub">Total billed amount</div>
                     <div class="report-detail">
                         <div class="detail-row">
                             <span class="label">Collected</span>
-                            <span class="value" style="color: #059669;">$<?php echo number_format($revenueStats['collected'] ?? 0, 2); ?></span>
+                            <span class="value" style="color: #059669;">Birr <?php echo number_format($revenueStats['collected'] ?? 0, 2); ?></span>
                         </div>
                         <div class="detail-row">
                             <span class="label">Outstanding</span>
-                            <span class="value" style="color: #dc2626;">$<?php echo number_format($revenueStats['outstanding'] ?? 0, 2); ?></span>
+                            <span class="value" style="color: #dc2626;">Birr <?php echo number_format($revenueStats['outstanding'] ?? 0, 2); ?></span>
                         </div>
                     </div>
                 </div>

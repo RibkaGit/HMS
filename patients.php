@@ -863,12 +863,12 @@ if (isset($_GET['message'])) {
 
                 <div class="form-grid-3">
                     <div class="form-group">
-                        <label for="phone">Phone</label>
-                        <input type="text" id="phone" name="phone" value="<?php echo htmlspecialchars($editPatient['phone'] ?? ''); ?>">
+                        <label for="phone">Phone *</label>
+                        <input type="text" id="phone" name="phone" required value="<?php echo htmlspecialchars($editPatient['phone'] ?? ''); ?>">
                     </div>
                     <div class="form-group">
-                        <label for="email">Email ID</label>
-                        <input type="email" id="email" name="email" value="<?php echo htmlspecialchars($editPatient['email'] ?? ''); ?>">
+                        <label for="email">Email ID *</label>
+                        <input type="email" id="email" name="email" required value="<?php echo htmlspecialchars($editPatient['email'] ?? ''); ?>">
                     </div>
                     <div class="form-group">
                         <label for="blood_group">Blood Group</label>

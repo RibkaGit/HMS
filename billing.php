@@ -652,17 +652,17 @@ if (isset($_GET['message'])) {
                                                 <?php foreach ($invoiceItems[$invoice['invoice_id']] as $item): ?>
                                                     <div class="item-row">
                                                         <span><?php echo htmlspecialchars($item['description']); ?></span>
-                                                        <span>$<?php echo number_format($item['line_total'], 2); ?></span>
+                                                        <span>Birr <?php echo number_format($item['line_total'], 2); ?></span>
                                                     </div>
                                                 <?php endforeach; ?>
                                             <?php endif; ?>
                                         </div>
                                     </td>
-                                    <td><strong>$<?php echo number_format($invoice['total'], 2); ?></strong></td>
-                                    <td>$<?php echo number_format($invoice['paid_amount'] ?? 0, 2); ?></td>
+                                    <td><strong>Birr <?php echo number_format($invoice['total'], 2); ?></strong></td>
+                                    <td>Birr <?php echo number_format($invoice['paid_amount'] ?? 0, 2); ?></td>
                                     <td>
                                         <strong class="balance">
-                                            $<?php echo number_format($invoice['total'] - ($invoice['paid_amount'] ?? 0), 2); ?>
+                                            Birr <?php echo number_format($invoice['total'] - ($invoice['paid_amount'] ?? 0), 2); ?>
                                         </strong>
                                     </td>
                                     <td>
@@ -683,7 +683,7 @@ if (isset($_GET['message'])) {
                                                 <div class="payment-history">
                                                     <?php foreach ($invoicePayments[$invoice['invoice_id']] as $payment): ?>
                                                         <div class="payment-item">
-                                                            <span>$<?php echo number_format($payment['amount'], 2); ?></span>
+                                                            <span>Birr <?php echo number_format($payment['amount'], 2); ?></span>
                                                             <span><?php echo htmlspecialchars($payment['method_name']); ?></span>
                                                             <span><?php echo date('M d, Y', strtotime($payment['paid_at'])); ?></span>
                                                         </div>
@@ -772,9 +772,9 @@ if (isset($_GET['message'])) {
             <div style="background: #f8fafc; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
                 <p><strong>Invoice:</strong> <?php echo htmlspecialchars($payInvoice['invoice_code']); ?></p>
                 <p><strong>Patient:</strong> <?php echo htmlspecialchars($payInvoice['patient_name']); ?></p>
-                <p><strong>Total:</strong> $<?php echo number_format($payInvoice['total'], 2); ?></p>
-                <p><strong>Paid:</strong> $<?php echo number_format($totalPaid, 2); ?></p>
-                <p><strong>Balance:</strong> <strong class="balance">$<?php echo number_format($balance, 2); ?></strong></p>
+                <p><strong>Total:</strong> Birr <?php echo number_format($payInvoice['total'], 2); ?></p>
+                <p><strong>Paid:</strong> Birr <?php echo number_format($totalPaid, 2); ?></p>
+                <p><strong>Balance:</strong> <strong class="balance">Birr <?php echo number_format($balance, 2); ?></strong></p>
             </div>
             
             <form method="POST" action="">

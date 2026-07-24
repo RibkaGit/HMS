@@ -22,13 +22,20 @@ $error = '';
 $selectedVisitId = isset($_GET['visit_id']) ? intval($_GET['visit_id']) : 0;
 
 // Get visits for dropdown
-$visits = $conn->query("SELECT v.visit_id, v.visit_code, p.first_name, p.last_name 
+$visits = $conn->query("SELECT v.visit_id, v.visit_code, p.first_name, p.last_name, d.first_name as doc_first, d.last_name as doc_last 
                         FROM visits v 
                         JOIN patients p ON v.patient_id = p.patient_id 
+                        LEFT JOIN staff d ON v.attending_doctor_id = d.staff_id
                         ORDER BY v.admitted_at DESC LIMIT 100")->fetch_all(MYSQLI_ASSOC);
 
 // Get test types of category 'Radiology'
-$testTypes = $conn->query("SELECT * FROM lookup_test_types WHERE is_active = 1 AND category = 'Radiology'")->fetch_all(MYSQLI_ASSOC);
+$testTypesQuery = $conn->query("SELECT * FROM lookup_test_types WHERE is_active = 1 AND category = 'Radiology' ORDER BY sub_category, name");
+$testTypes = $testTypesQuery ? $testTypesQuery->fetch_all(MYSQLI_ASSOC) : [];
+$radCategories = [];
+foreach ($testTypes as $test) {
+    $sub = !empty($test['sub_category']) ? $test['sub_category'] : 'Other';
+    $radCategories[$sub][] = $test;
+}
 
 // Get order statuses
 $orderStatuses = $conn->query("SELECT * FROM lookup_order_statuses")->fetch_all(MYSQLI_ASSOC);
@@ -126,9 +133,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         'result_notes' => sanitizeInput($_POST['result_notes'] ?? '')
     ];
     
+    // Handle attachment upload
+    $attachmentPath = null;
+    if (isset($_FILES['attachment']) && $_FILES['attachment']['error'] === UPLOAD_ERR_OK) {
+        $uploadDir = 'uploads/radiology/';
+        if (!is_dir($uploadDir)) {
+            mkdir($uploadDir, 0777, true);
+        }
+        $fileName = time() . '_' . basename($_FILES['attachment']['name']);
+        $targetPath = $uploadDir . $fileName;
+        
+        $allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'application/pdf'];
+        if (in_array($_FILES['attachment']['type'], $allowedTypes)) {
+            if (move_uploaded_file($_FILES['attachment']['tmp_name'], $targetPath)) {
+                $attachmentPath = $targetPath;
+            }
+        }
+    }
+    
     // Reuse lab result function as it writes to lab_results
     $result = updateLabResult($conn, intval($_POST['order_id']), $resultData);
     if ($result) {
+        if ($attachmentPath) {
+            $orderId = intval($_POST['order_id']);
+            $updateAttachment = $conn->prepare("UPDATE lab_results SET attachment_path = ? WHERE order_id = ? ORDER BY result_id DESC LIMIT 1");
+            $updateAttachment->bind_param('si', $attachmentPath, $orderId);
+            $updateAttachment->execute();
+        }
         $visitStmt = $conn->prepare("SELECT visit_id FROM lab_orders WHERE order_id = ?");
         $visitStmt->bind_param('i', $_POST['order_id']);
         $visitStmt->execute();
@@ -146,6 +177,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 }
 
 // ============================================================================
+// ADD RADIOLOGY RESULT (BULK FOR GROUPED VIEW)
+// ============================================================================
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add_bulk_results') {
+    $visitId = intval($_POST['visit_id']);
+    $successCount = 0;
+    
+    foreach ($_POST['results'] as $orderId => $resultData) {
+        if (!empty($resultData['value'])) {
+            $data = [
+                'entered_by' => $_SESSION['user_id'],
+                'result_value' => $resultData['value'],
+                'result_notes' => sanitizeInput($resultData['notes'] ?? '')
+            ];
+            
+            $attachmentPath = null;
+            if (isset($_FILES['results']['name'][$orderId]['attachment']) && $_FILES['results']['error'][$orderId]['attachment'] === UPLOAD_ERR_OK) {
+                $uploadDir = 'uploads/radiology/';
+                if (!is_dir($uploadDir)) {
+                    mkdir($uploadDir, 0777, true);
+                }
+                $fileName = time() . '_' . basename($_FILES['results']['name'][$orderId]['attachment']);
+                $targetPath = $uploadDir . $fileName;
+                
+                $allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'application/pdf'];
+                if (in_array($_FILES['results']['type'][$orderId]['attachment'], $allowedTypes)) {
+                    if (move_uploaded_file($_FILES['results']['tmp_name'][$orderId]['attachment'], $targetPath)) {
+                        $attachmentPath = $targetPath;
+                    }
+                }
+            }
+            
+            if (updateLabResult($conn, intval($orderId), $data)) {
+                if ($attachmentPath) {
+                    $updateAttachment = $conn->prepare("UPDATE lab_results SET attachment_path = ? WHERE order_id = ? ORDER BY result_id DESC LIMIT 1");
+                    $oId = intval($orderId);
+                    $updateAttachment->bind_param('si', $attachmentPath, $oId);
+                    $updateAttachment->execute();
+                }
+                $successCount++;
+            }
+        }
+    }
+    
+    if ($successCount > 0) {
+        updateVisitStatus($conn, $visitId, 'Awaiting Billing');
+        logUserActivity($conn, $_SESSION['user_id'], 'Added Radiology Results', "Added {$successCount} radiology results for visit ID: {$visitId}");
+        $message = "Successfully added {$successCount} radiology result(s)!";
+        header('Location: radiology.php?message=' . urlencode($message));
+        exit();
+    } else {
+        $error = 'No results were added. Please try again.';
+    }
+}
+
+// ============================================================================
 // GET RADIOLOGY ORDERS
 // ============================================================================
 $searchTerm = isset($_GET['search']) ? sanitizeInput($_GET['search']) : '';
@@ -157,6 +243,7 @@ $query = "SELECT lo.*,
           CONCAT(s.first_name, ' ', s.last_name) as ordered_by_name,
           CONCAT(p.first_name, ' ', p.last_name) as patient_name,
           p.patient_code,
+          p.patient_id,
           v.visit_code
           FROM lab_orders lo
           JOIN lookup_test_types vt ON lo.test_type_id = vt.test_type_id
@@ -192,6 +279,24 @@ if (!empty($params)) {
 }
 $stmt->execute();
 $radiologyOrders = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+// Group orders by patient/visit
+$groupedOrders = [];
+foreach ($radiologyOrders as $order) {
+    $key = $order['visit_id'];
+    if (!isset($groupedOrders[$key])) {
+        $groupedOrders[$key] = [
+            'visit_id' => $order['visit_id'],
+            'visit_code' => $order['visit_code'],
+            'patient_id' => $order['patient_id'],
+            'patient_name' => $order['patient_name'],
+            'patient_code' => $order['patient_code'],
+            'ordered_by_name' => $order['ordered_by_name'],
+            'tests' => []
+        ];
+    }
+    $groupedOrders[$key]['tests'][] = $order;
+}
 
 // Patients referred from medical records (needs radiology)
 $pendingRadiologyQuery = "SELECT mr.record_id, mr.visit_id, mr.diagnosis, mr.created_at,
@@ -610,84 +715,74 @@ if (!empty($radiologyOrders)) {
                     <table class="recent-table">
                         <thead>
                             <tr>
-                                <th>Order ID</th>
                                 <th>Patient</th>
                                 <th>Visit</th>
-                                <th>Test</th>
-                                <th>Category</th>
                                 <th>Ordered By</th>
-                                <th>Status</th>
+                                <th>Tests</th>
+                                <th>Overall Status</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            <?php if (empty($radiologyOrders)): ?>
+                            <?php if (empty($groupedOrders)): ?>
                                 <tr>
-                                    <td colspan="8" style="text-align: center; color: #94a3b8; padding: 40px;">
+                                    <td colspan="6" style="text-align: center; color: #94a3b8; padding: 40px;">
                                         <i class="fas fa-x-ray" style="font-size: 32px; display: block; margin-bottom: 8px;"></i>
                                         No radiology orders found
                                     </td>
                                 </tr>
                             <?php else: ?>
-                                <?php foreach ($radiologyOrders as $order): ?>
+                                <?php foreach ($groupedOrders as $group): ?>
                                 <tr>
-                                    <td><strong>#<?php echo $order['order_id']; ?></strong></td>
                                     <td>
                                         <div class="patient-info">
-                                            <div class="avatar" style="background: <?php echo getUserColor($order['patient_name']); ?>; width: 32px; height: 32px; font-size: 12px;">
-                                                <?php echo strtoupper(substr($order['patient_name'], 0, 1)); ?>
+                                            <div class="avatar" style="background: <?php echo getUserColor($group['patient_name']); ?>; width: 32px; height: 32px; font-size: 12px;">
+                                                <?php echo strtoupper(substr($group['patient_name'], 0, 1)); ?>
                                             </div>
                                             <div>
-                                                <span class="patient-name"><?php echo htmlspecialchars($order['patient_name']); ?></span>
-                                                <small><?php echo htmlspecialchars($order['patient_code']); ?></small>
+                                                <span class="patient-name"><?php echo htmlspecialchars($group['patient_name']); ?></span>
+                                                <small><?php echo htmlspecialchars($group['patient_code']); ?></small>
                                             </div>
                                         </div>
                                     </td>
-                                    <td><?php echo htmlspecialchars($order['visit_code']); ?></td>
-                                    <td><?php echo htmlspecialchars($order['test_name']); ?></td>
-                                    <td><span style="background: #faf5ff; border: 1px solid #e9d5ff; color: #7c3aed; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500;"><?php echo htmlspecialchars($order['category']); ?></span></td>
-                                    <td><?php echo htmlspecialchars($order['ordered_by_name']); ?></td>
+                                    <td><?php echo htmlspecialchars($group['visit_code']); ?></td>
+                                    <td><?php echo htmlspecialchars($group['ordered_by_name']); ?></td>
                                     <td>
-                                        <span class="status-badge-rad status-<?php echo strtolower(str_replace(' ', '', $order['status_name'])); ?>">
-                                            <?php echo htmlspecialchars($order['status_name'] === 'Sample Collected' ? 'Imaging Scheduled' : ($order['status_name'] === 'Result Ready' ? 'Scan Ready' : $order['status_name'])); ?>
-                                        </span>
+                                        <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                                            <?php foreach ($group['tests'] as $test): ?>
+                                                <span style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 11px; color: #475569; border: 1px solid #e2e8f0;">
+                                                    <?php echo htmlspecialchars($test['test_name']); ?>
+                                                </span>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <?php 
+                                        $allComplete = true;
+                                        $anyInProgress = false;
+                                        foreach ($group['tests'] as $test) {
+                                            if ($test['status_name'] !== 'Result Ready' && $test['status_name'] !== 'Reviewed') {
+                                                $allComplete = false;
+                                            }
+                                            if ($test['status_name'] === 'Ordered' || $test['status_name'] === 'Sample Collected') {
+                                                $anyInProgress = true;
+                                            }
+                                        }
+                                        if ($allComplete) {
+                                            echo '<span class="status-badge-rad status-resultready">Complete</span>';
+                                        } elseif ($anyInProgress) {
+                                            echo '<span class="status-badge-rad status-ordered">In Progress</span>';
+                                        } else {
+                                            echo '<span class="status-badge-rad status-reviewed">Reviewed</span>';
+                                        }
+                                        ?>
                                     </td>
                                     <td>
                                         <div class="action-buttons">
-                                            <?php if ($order['status_name'] === 'Ordered' || $order['status_name'] === 'Sample Collected'): ?>
-                                                <form method="POST" action="" style="display: inline;">
-                                                    <input type="hidden" name="action" value="update_status">
-                                                    <input type="hidden" name="order_id" value="<?php echo $order['order_id']; ?>">
-                                                    <select name="status_id" onchange="this.form.submit()" style="padding: 4px 8px; border-radius: 4px; border: 1px solid #e2e8f0; font-size: 12px; font-family: inherit;">
-                                                        <?php foreach ($orderStatuses as $status): ?>
-                                                            <option value="<?php echo $status['order_status_id']; ?>" <?php echo $status['order_status_id'] == $order['order_status_id'] ? 'selected' : ''; ?>>
-                                                                <?php echo $status['name'] === 'Sample Collected' ? 'Imaging Scheduled' : ($status['name'] === 'Result Ready' ? 'Scan Ready' : $status['name']); ?>
-                                                            </option>
-                                                        <?php endforeach; ?>
-                                                    </select>
-                                                </form>
-                                            <?php endif; ?>
-                                            
-                                            <?php if ($order['status_name'] !== 'Result Ready' && $order['status_name'] !== 'Reviewed' && $order['status_name'] !== 'Cancelled'): ?>
-                                                <a href="radiology.php?action=result&id=<?php echo $order['order_id']; ?>" class="btn-result">
-                                                    <i class="fas fa-plus"></i> Add Report/Scan Result
-                                                </a>
-                                            <?php endif; ?>
+                                            <a href="radiology.php?action=view_grouped&visit_id=<?php echo $group['visit_id']; ?>" class="btn-result">
+                                                <i class="fas fa-eye"></i> View & Add Results
+                                            </a>
                                         </div>
-                                        
-                                        <?php if (isset($radiologyResults[$order['order_id']])): ?>
-                                            <div class="result-box">
-                                                <?php foreach ($radiologyResults[$order['order_id']] as $result): ?>
-                                                    <p><span class="result-label">Diagnosis Report:</span> <?php echo htmlspecialchars($result['result_value']); ?></p>
-                                                    <?php if ($result['result_notes']): ?>
-                                                        <p><span class="result-label">Radiologist Notes:</span> <?php echo htmlspecialchars($result['result_notes']); ?></p>
-                                                    <?php endif; ?>
-                                                    <p style="font-size: 11px; color: #94a3b8;">
-                                                        Entered: <?php echo date('M d, Y g:i A', strtotime($result['entered_at'])); ?>
-                                                    </p>
-                                                <?php endforeach; ?>
-                                            </div>
-                                        <?php endif; ?>
                                     </td>
                                 </tr>
                                 <?php endforeach; ?>
@@ -717,14 +812,14 @@ if (!empty($radiologyOrders)) {
                     <?php if ($selectedVisitId > 0): ?>
                         <?php foreach ($visits as $visit): if ((int) $visit['visit_id'] === $selectedVisitId): ?>
                             <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
-                            <input type="text" value="<?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['first_name'] . ' ' . $visit['last_name']); ?>" readonly style="background: #f8fafc; font-weight: 500;">
+                            <input type="text" value="<?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['first_name'] . ' ' . $visit['last_name'] . ($visit['doc_first'] ? ' (Dr. ' . $visit['doc_first'] . ' ' . $visit['doc_last'] . ')' : '')); ?>" readonly style="background: #f8fafc; font-weight: 500; width: 100%; border: 1px solid #e2e8f0; padding: 10px 12px; border-radius: 8px;">
                         <?php endif; endforeach; ?>
                     <?php else: ?>
                     <select id="visit_id" name="visit_id" required>
                         <option value="">Select Visit</option>
                         <?php foreach ($visits as $visit): ?>
                             <option value="<?php echo $visit['visit_id']; ?>" <?php echo $selectedVisitId === (int) $visit['visit_id'] ? 'selected' : ''; ?>>
-                                <?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['first_name'] . ' ' . $visit['last_name']); ?>
+                                <?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['first_name'] . ' ' . $visit['last_name'] . ($visit['doc_first'] ? ' (Dr. ' . $visit['doc_first'] . ' ' . $visit['doc_last'] . ')' : '')); ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
@@ -733,13 +828,19 @@ if (!empty($radiologyOrders)) {
                 
                 <div class="form-group">
                     <label>Imaging Tests Required *</label>
-                    <div class="test-checklist" style="display: flex; flex-direction: column; gap: 8px; max-height: 250px; overflow-y: auto; padding: 4px;">
-                        <?php foreach ($testTypes as $test): ?>
-                            <label>
-                                <input type="checkbox" name="test_type_ids[]" value="<?php echo $test['test_type_id']; ?>">
-                                <span style="font-weight: 500;"><?php echo htmlspecialchars($test['name']); ?></span>
-                                <span style="margin-left: auto; color: var(--primary-purple-dark); font-weight: 600;">$<?php echo number_format($test['price'], 2); ?></span>
-                            </label>
+                    <div class="test-categories-container" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px;">
+                        <?php foreach ($radCategories as $subCat => $tests): ?>
+                            <div class="test-category-card" style="background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                                <h4 style="margin-top: 0; margin-bottom: 8px; color: var(--primary-purple-dark); font-size: 14px; border-bottom: 2px solid var(--primary-purple-border); padding-bottom: 4px;"><i class="fas fa-layer-group"></i> <?php echo htmlspecialchars($subCat); ?></h4>
+                                <div class="test-checklist" style="max-height: 200px; overflow-y: auto;">
+                                    <?php foreach ($tests as $test): ?>
+                                        <label style="display: flex; align-items: flex-start; gap: 8px; margin: 6px 0; font-size: 13px; cursor: pointer; border: none; padding: 4px; background: transparent;">
+                                            <input type="checkbox" name="test_type_ids[]" value="<?php echo $test['test_type_id']; ?>" style="margin-top: 2px; width: auto;">
+                                            <span><?php echo htmlspecialchars($test['name']); ?> <br><small style="color: var(--primary-purple); font-weight: 600;">Birr <?php echo number_format($test['price'], 2); ?></small></span>
+                                        </label>
+                                    <?php endforeach; ?>
+                                </div>
+                            </div>
                         <?php endforeach; ?>
                     </div>
                 </div>
@@ -779,7 +880,7 @@ if (!empty($radiologyOrders)) {
                 <p style="margin: 4px 0;"><strong>Imaging Test:</strong> <?php echo htmlspecialchars($orderData['test_name']); ?></p>
             </div>
             
-            <form method="POST" action="">
+            <form method="POST" action="" enctype="multipart/form-data">
                 <input type="hidden" name="action" value="add_result">
                 <input type="hidden" name="order_id" value="<?php echo $orderId; ?>">
                 
@@ -793,6 +894,11 @@ if (!empty($radiologyOrders)) {
                     <textarea id="result_notes" name="result_notes" rows="3" placeholder="Enter additional notes or recommendations..."></textarea>
                 </div>
                 
+                <div class="form-group">
+                    <label for="attachment">Upload Scan/Image</label>
+                    <input type="file" id="attachment" name="attachment" accept="image/*,.pdf" style="padding: 6px;">
+                </div>
+                
                 <div class="btn-group">
                     <button type="submit" class="btn-submit" style="color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; padding: 12px;">
                         <i class="fas fa-save"></i> Save Report
@@ -800,6 +906,129 @@ if (!empty($radiologyOrders)) {
                     <button type="button" class="btn-cancel" onclick="window.location.href='radiology.php'">Cancel</button>
                 </div>
             </form>
+        </div>
+    </div>
+    </div>
+    <?php endif; ?>
+
+    <!-- View Grouped Radiology Results Modal -->
+    <?php if (isset($_GET['action']) && $_GET['action'] === 'view_grouped' && isset($_GET['visit_id'])): ?>
+    <?php
+    $visitId = intval($_GET['visit_id']);
+    $visitTestsQuery = "SELECT lo.*, vt.name as test_name, vt.category, os.name as status_name,
+                        lr.result_value, lr.result_notes, lr.entered_at, lr.attachment_path,
+                        CONCAT(p.first_name, ' ', p.last_name) as patient_name,
+                        p.patient_code,
+                        v.visit_code
+                        FROM lab_orders lo
+                        JOIN lookup_test_types vt ON lo.test_type_id = vt.test_type_id
+                        JOIN lookup_order_statuses os ON lo.order_status_id = os.order_status_id
+                        JOIN visits v ON lo.visit_id = v.visit_id
+                        JOIN patients p ON v.patient_id = p.patient_id
+                        LEFT JOIN lab_results lr ON lo.order_id = lr.order_id
+                        WHERE lo.visit_id = ? AND vt.category = 'Radiology'
+                        ORDER BY lo.ordered_at ASC";
+    $visitStmt = $conn->prepare($visitTestsQuery);
+    $visitStmt->bind_param('i', $visitId);
+    $visitStmt->execute();
+    $visitTests = $visitStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $visitInfo = !empty($visitTests) ? $visitTests[0] : null;
+    ?>
+    <div class="form-modal" style="display: flex;">
+        <div class="form-modal-content" style="max-width: 900px;">
+            <button class="close-btn" onclick="window.location.href='radiology.php'">&times;</button>
+            <h2 style="margin-bottom: 24px; color: var(--primary-purple-dark);"><i class="fas fa-x-ray"></i> Radiology Results - <?php echo htmlspecialchars($visitInfo['patient_name'] ?? 'Patient'); ?></h2>
+            
+            <?php if ($visitInfo): ?>
+            <div style="background: #faf5ff; padding: 16px; border-radius: 8px; margin-bottom: 24px; border: 1px solid #e9d5ff;">
+                <p style="margin: 4px 0;"><strong>Patient:</strong> <?php echo htmlspecialchars($visitInfo['patient_name']); ?> (<?php echo htmlspecialchars($visitInfo['patient_code']); ?>)</p>
+                <p style="margin: 4px 0;"><strong>Visit:</strong> <?php echo htmlspecialchars($visitInfo['visit_code']); ?></p>
+            </div>
+            
+            <form method="POST" action="" enctype="multipart/form-data">
+                <input type="hidden" name="action" value="add_bulk_results">
+                <input type="hidden" name="visit_id" value="<?php echo $visitId; ?>">
+                
+                <div style="display: flex; flex-direction: column; gap: 16px;">
+                    <?php foreach ($visitTests as $test): ?>
+                    <div style="background: #fff; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <h3 style="margin: 0; font-size: 16px; color: #1e293b;"><?php echo htmlspecialchars($test['test_name']); ?></h3>
+                            <span class="status-badge-rad status-<?php echo strtolower(str_replace(' ', '', $test['status_name'])); ?>">
+                                <?php echo htmlspecialchars($test['status_name'] === 'Sample Collected' ? 'Imaging Scheduled' : ($test['status_name'] === 'Result Ready' ? 'Scan Ready' : $test['status_name'])); ?>
+                            </span>
+                        </div>
+                        
+                        <?php if ($test['result_value']): ?>
+                        <div style="background: #f0fdf4; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+                            <p style="margin: 0;"><strong>Result:</strong> <?php echo htmlspecialchars($test['result_value']); ?></p>
+                            <?php if ($test['result_notes']): ?>
+                            <p style="margin: 4px 0 0 0;"><strong>Notes:</strong> <?php echo htmlspecialchars($test['result_notes']); ?></p>
+                            <?php endif; ?>
+                            <?php if (!empty($test['attachment_path'])): ?>
+                                <p style="margin: 4px 0 0 0;"><strong>Attachment:</strong> <a href="<?php echo htmlspecialchars($test['attachment_path']); ?>" target="_blank" style="color: var(--primary-purple); text-decoration: underline;"><i class="fas fa-paperclip"></i> View File</a></p>
+                            <?php endif; ?>
+                            <p style="margin: 4px 0 0 0; font-size: 12px; color: #64748b;">
+                                Entered: <?php echo date('M d, Y g:i A', strtotime($test['entered_at'])); ?>
+                            </p>
+                        </div>
+                        <?php else: ?>
+                        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                            <div style="flex: 2; min-width: 250px;">
+                                <label style="display: block; margin-bottom: 6px; font-weight: 500;">Findings / Report *</label>
+                                <textarea name="results[<?php echo $test['order_id']; ?>][value]" rows="2" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;" placeholder="Enter diagnostic findings..."></textarea>
+                            </div>
+                            <div style="flex: 1; min-width: 200px;">
+                                <label style="display: block; margin-bottom: 6px; font-weight: 500;">Notes (Optional)</label>
+                                <textarea name="results[<?php echo $test['order_id']; ?>][notes]" rows="2" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;" placeholder="Additional notes..."></textarea>
+                            </div>
+                            <div style="flex: 1; min-width: 200px;">
+                                <label style="display: block; margin-bottom: 6px; font-weight: 500;">Upload Scan</label>
+                                <input type="file" name="results[<?php echo $test['order_id']; ?>][attachment]" accept="image/*,.pdf" style="width: 100%; padding: 6px; border: 1px dashed #cbd5e1; border-radius: 6px;">
+                            </div>
+                        </div>
+                        <?php endif; ?>
+                        
+                        <?php if ($test['status_name'] === 'Ordered' || $test['status_name'] === 'Sample Collected'): ?>
+                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e2e8f0;">
+                            <label style="font-weight: 500; font-size: 12px; margin-right: 8px;">Update Status:</label>
+                            <form method="POST" action="" style="display: inline;">
+                                <input type="hidden" name="action" value="update_status">
+                                <input type="hidden" name="order_id" value="<?php echo $test['order_id']; ?>">
+                                <input type="hidden" name="return_to_grouped" value="1">
+                                <input type="hidden" name="visit_id" value="<?php echo $visitId; ?>">
+                                <select name="status_id" onchange="this.form.submit()" style="padding: 4px 8px; border-radius: 4px; border: 1px solid #e2e8f0; font-size: 12px;">
+                                    <?php foreach ($orderStatuses as $status): ?>
+                                        <option value="<?php echo $status['order_status_id']; ?>" <?php echo $status['order_status_id'] == $test['order_status_id'] ? 'selected' : ''; ?>>
+                                            <?php echo $status['name'] === 'Sample Collected' ? 'Imaging Scheduled' : ($status['name'] === 'Result Ready' ? 'Scan Ready' : $status['name']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </form>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+                
+                <?php
+                $allCompleted = true;
+                foreach ($visitTests as $test) {
+                    if (!$test['result_value']) $allCompleted = false;
+                }
+                ?>
+                
+                <?php if (!$allCompleted): ?>
+                <div style="margin-top: 24px; text-align: right;">
+                    <button type="submit" class="btn-submit" style="background: var(--primary-purple); padding: 12px 24px; color: #fff; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;">
+                        <i class="fas fa-save"></i> Save All Entered Results
+                    </button>
+                </div>
+                <?php endif; ?>
+            </form>
+            <?php else: ?>
+                <p>No tests found for this visit.</p>
+            <?php endif; ?>
         </div>
     </div>
     <?php endif; ?>

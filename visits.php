@@ -492,25 +492,48 @@ if (isset($_GET['message'])) {
                                             <a href="visits.php?action=edit&id=<?php echo $visit['visit_id']; ?>" class="btn-edit">
                                                 <i class="fas fa-edit"></i> Edit
                                             </a>
-                                            <a href="vital_signs.php?action=create_vital&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
-                                                <i class="fas fa-heartbeat"></i> Vital
-                                            </a>
-                                            <a href="medical_records.php?action=create_record&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
-                                                <i class="fas fa-file-medical"></i> Record
-                                            </a>
-                                            <a href="lab.php?action=create&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
-                                                <i class="fas fa-flask"></i> Lab
-                                            </a>
-                                            <a href="radiology.php?action=create&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
-                                                <i class="fas fa-x-ray"></i> Radiology
-                                            </a>
-                                            <a href="pharmacy.php?action=create_prescription&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
-                                                <i class="fas fa-pills"></i> Medication
-                                            </a>
-                                            <?php if ($visit['visit_type'] === 'IPD'): ?>
-                                                <a href="bed_management.php?action=assign_bed&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
-                                                    <i class="fas fa-bed"></i> Bed
+                                            <?php if ($visit['visit_status'] === 'Awaiting Billing'): ?>
+                                                <a href="#" onclick="return false;" class="btn-create-action" style="opacity: 0.5; cursor: not-allowed;" title="Payment Required">
+                                                    <i class="fas fa-heartbeat"></i> Vital
                                                 </a>
+                                                <a href="#" onclick="return false;" class="btn-create-action" style="opacity: 0.5; cursor: not-allowed;" title="Payment Required">
+                                                    <i class="fas fa-file-medical"></i> Record
+                                                </a>
+                                                <a href="#" onclick="return false;" class="btn-create-action" style="opacity: 0.5; cursor: not-allowed;" title="Payment Required">
+                                                    <i class="fas fa-flask"></i> Lab
+                                                </a>
+                                                <a href="#" onclick="return false;" class="btn-create-action" style="opacity: 0.5; cursor: not-allowed;" title="Payment Required">
+                                                    <i class="fas fa-x-ray"></i> Radiology
+                                                </a>
+                                                <a href="#" onclick="return false;" class="btn-create-action" style="opacity: 0.5; cursor: not-allowed;" title="Payment Required">
+                                                    <i class="fas fa-pills"></i> Medication
+                                                </a>
+                                                <?php if ($visit['visit_type'] === 'IPD'): ?>
+                                                    <a href="#" onclick="return false;" class="btn-create-action" style="opacity: 0.5; cursor: not-allowed;" title="Payment Required">
+                                                        <i class="fas fa-bed"></i> Bed
+                                                    </a>
+                                                <?php endif; ?>
+                                            <?php elseif ($visit['visit_status'] !== 'Cancelled'): ?>
+                                                <a href="vital_signs.php?action=create_vital&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
+                                                    <i class="fas fa-heartbeat"></i> Vital
+                                                </a>
+                                                <a href="medical_records.php?action=create_record&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
+                                                    <i class="fas fa-file-medical"></i> Record
+                                                </a>
+                                                <a href="lab.php?action=create&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
+                                                    <i class="fas fa-flask"></i> Lab
+                                                </a>
+                                                <a href="radiology.php?action=create&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
+                                                    <i class="fas fa-x-ray"></i> Radiology
+                                                </a>
+                                                <a href="pharmacy.php?action=create_prescription&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
+                                                    <i class="fas fa-pills"></i> Medication
+                                                </a>
+                                                <?php if ($visit['visit_type'] === 'IPD'): ?>
+                                                    <a href="bed_management.php?action=assign_bed&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
+                                                        <i class="fas fa-bed"></i> Bed
+                                                    </a>
+                                                <?php endif; ?>
                                             <?php endif; ?>
                                             <?php if ($visit['visit_status'] !== 'Cancelled' && $visit['visit_status'] !== 'Discharged'): ?>
                                                 <a href="visits.php?action=delete&id=<?php echo $visit['visit_id']; ?>" class="btn-delete" onclick="return confirm('Are you sure you want to cancel this visit?');">

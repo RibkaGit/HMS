@@ -105,7 +105,7 @@ $lowStockMedications = getLowStockMedications($conn);
                         <i class="fas fa-hand-holding-usd"></i>
                     </div>
                     <div class="stat-info">
-                        <h3>$<?php echo number_format($stats['today_revenue'], 2); ?></h3>
+                        <h3>Birr <?php echo number_format($stats['today_revenue'], 2); ?></h3>
                         <p>Today's Revenue</p>
                         <span class="stat-change positive">
                             <i class="fas fa-arrow-up"></i> <?php echo $stats['revenue_growth']; ?>%

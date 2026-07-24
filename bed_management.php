@@ -1056,7 +1056,7 @@ if (isset($_GET['message'])) {
                             <div style="font-size: 12px; color: #64748b;">
                                 <?php echo htmlspecialchars($bed['bed_type_name'] ?? 'General'); ?>
                                 <?php if ($bed['price_per_day']): ?>
-                                    - $<?php echo number_format($bed['price_per_day'], 2); ?>/day
+                                    - Birr <?php echo number_format($bed['price_per_day'], 2); ?>/day
                                 <?php endif; ?>
                             </div>
                             <div class="bed-status status-<?php echo strtolower($bed['status']); ?>">

@@ -30,18 +30,52 @@ $error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'create') {
     $primaryDoctorId = null;
     
-    // Check for duplicate patient (by phone or national_id)
+    // Check for duplicate patient (by phone, national_id, or first_name + last_name + date_of_birth)
     $phone = sanitizeInput($_POST['phone']);
     $nationalId = sanitizeInput($_POST['national_id']);
+    $firstName = sanitizeInput($_POST['first_name']);
+    $lastName = sanitizeInput($_POST['last_name']);
+    $dob = !empty($_POST['date_of_birth']) ? $_POST['date_of_birth'] : null;
     
-    $duplicateCheck = "SELECT patient_id FROM patients WHERE (phone = ? OR national_id = ?) AND is_active = 1";
-    $dupStmt = $conn->prepare($duplicateCheck);
-    $dupStmt->bind_param('ss', $phone, $nationalId);
-    $dupStmt->execute();
-    $duplicateResult = $dupStmt->get_result();
+    $dupQuery = "SELECT patient_id FROM patients WHERE is_active = 1 AND (";
+    $conditions = [];
+    $params = [];
+    $types = "";
     
-    if ($duplicateResult->num_rows > 0) {
-        $error = 'Patient with this phone number or national ID already exists. Please check for duplicates.';
+    if (!empty($phone)) {
+        $conditions[] = "phone = ?";
+        $params[] = $phone;
+        $types .= "s";
+    }
+    if (!empty($nationalId)) {
+        $conditions[] = "national_id = ?";
+        $params[] = $nationalId;
+        $types .= "s";
+    }
+    if (!empty($firstName) && !empty($lastName) && !empty($dob)) {
+        $conditions[] = "(first_name = ? AND last_name = ? AND date_of_birth = ?)";
+        $params[] = $firstName;
+        $params[] = $lastName;
+        $params[] = $dob;
+        $types .= "sss";
+    }
+    
+    $hasDuplicate = false;
+    if (!empty($conditions)) {
+        $dupQuery .= implode(" OR ", $conditions) . ")";
+        $dupStmt = $conn->prepare($dupQuery);
+        if ($dupStmt) {
+            $dupStmt->bind_param($types, ...$params);
+            $dupStmt->execute();
+            $duplicateResult = $dupStmt->get_result();
+            if ($duplicateResult && $duplicateResult->num_rows > 0) {
+                $hasDuplicate = true;
+            }
+        }
+    }
+    
+    if ($hasDuplicate) {
+        $error = 'Patient with this name/DOB, phone number, or national ID already exists. Please check for duplicates.';
     } else {
         $data = [
             'patient_code' => generatePatientCode($conn),
@@ -100,79 +134,85 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                   relative_same_address, relative_relationship, relative_name, relative_phone, relative_address_village, 
                   relative_province, relative_district_khan, relative_commune_sangkat, relative_postal_code, relative_telephone_2, 
                   primary_doctor_id, payment_confirmed) 
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-        $stmt = $conn->prepare($query);
-        $stmt->bind_param('ssisssssissssssssssssssssssssisssisssssssssii',
-            $data['patient_code'],
-            $data['uhid_date'],
-            $data['new_born'],
-            $data['title'],
-            $data['first_name'],
-            $data['middle_name'],
-            $data['last_name'],
-            $data['date_of_birth'],
-            $data['gender_id'],
-            $data['marital_status'],
-            $data['occupation'],
-            $data['language'],
-            $data['religion'],
-            $data['nationality'],
-            $data['phone'],
-            $data['email'],
-            $data['loyalty_name'],
-            $data['loyalty_card_no'],
-            $data['loyalty_expiry_date'],
-            $data['national_id'],
-            $data['blood_group'],
-            $data['identity_type'],
-            $data['visa_validity'],
-            $data['address'],
-            $data['address_village'],
-            $data['province'],
-            $data['district_khan'],
-            $data['commune_sangkat'],
-            $data['postal_code'],
-            $data['postal_address_same'],
-            $data['telephone_2'],
-            $data['emergency_contact_name'],
-            $data['emergency_contact_phone'],
-            $data['relative_same_address'],
-            $data['relative_relationship'],
-            $data['relative_name'],
-            $data['relative_phone'],
-            $data['relative_address_village'],
-            $data['relative_province'],
-            $data['relative_district_khan'],
-            $data['relative_commune_sangkat'],
-            $data['relative_postal_code'],
-            $data['relative_telephone_2'],
-            $data['primary_doctor_id'],
-            $data['payment_confirmed']
-        );
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         
-        if ($stmt->execute()) {
-            $patientId = $conn->insert_id;
-            $visitData = [
-                'visit_code' => generateVisitCode($conn),
-                'patient_id' => $patientId,
-                'visit_type_id' => getLookupId($conn, 'lookup_visit_types', 'name', 'OPD'),
-                'department_id' => getLookupId($conn, 'lookup_departments', 'code', 'OPD'),
-                'attending_doctor_id' => null,
-                'visit_status_id' => getLookupId($conn, 'lookup_visit_statuses', 'name', 'Awaiting Billing'),
-                'notes' => 'Automatically created during patient registration'
-            ];
-            $visitId = createVisit($conn, $visitData);
-            if (!$visitId || !addInvoiceCharge($conn, $visitId, 'OPD registration and consultation', 'Consultation', 1, 50.00)) {
-                $error = 'Patient was created, but the automatic OPD visit or billing record could not be created.';
-            }
-            logUserActivity($conn, $_SESSION['user_id'], 'Created Patient', "Created patient: {$data['first_name']} {$data['last_name']}");
-            if (!$error) {
-                $message = 'Patient registered as OPD and added to billing successfully!';
-                header('Location: patients.php?message=' . urlencode($message));
-                exit();
-            }
+        $stmt = $conn->prepare($query);
+        
+        if ($stmt === false) {
+            $error = 'Failed to prepare statement: ' . $conn->error;
         } else {
-            $error = 'Failed to create patient. Please try again: ' . $stmt->error;
+            $stmt->bind_param('ssisssssissssssssssssssssssssisssisssssssssii',
+                $data['patient_code'],
+                $data['uhid_date'],
+                $data['new_born'],
+                $data['title'],
+                $data['first_name'],
+                $data['middle_name'],
+                $data['last_name'],
+                $data['date_of_birth'],
+                $data['gender_id'],
+                $data['marital_status'],
+                $data['occupation'],
+                $data['language'],
+                $data['religion'],
+                $data['nationality'],
+                $data['phone'],
+                $data['email'],
+                $data['loyalty_name'],
+                $data['loyalty_card_no'],
+                $data['loyalty_expiry_date'],
+                $data['national_id'],
+                $data['blood_group'],
+                $data['identity_type'],
+                $data['visa_validity'],
+                $data['address'],
+                $data['address_village'],
+                $data['province'],
+                $data['district_khan'],
+                $data['commune_sangkat'],
+                $data['postal_code'],
+                $data['postal_address_same'],
+                $data['telephone_2'],
+                $data['emergency_contact_name'],
+                $data['emergency_contact_phone'],
+                $data['relative_same_address'],
+                $data['relative_relationship'],
+                $data['relative_name'],
+                $data['relative_phone'],
+                $data['relative_address_village'],
+                $data['relative_province'],
+                $data['relative_district_khan'],
+                $data['relative_commune_sangkat'],
+                $data['relative_postal_code'],
+                $data['relative_telephone_2'],
+                $data['primary_doctor_id'],
+                $data['payment_confirmed']
+            );
+            
+            if ($stmt->execute()) {
+                $patientId = $conn->insert_id;
+                $visitData = [
+                    'visit_code' => generateVisitCode($conn),
+                    'patient_id' => $patientId,
+                    'visit_type_id' => getLookupId($conn, 'lookup_visit_types', 'name', 'OPD'),
+                    'department_id' => getLookupId($conn, 'lookup_departments', 'code', 'OPD'),
+                    'attending_doctor_id' => null,
+                    'visit_status_id' => getLookupId($conn, 'lookup_visit_statuses', 'name', 'Awaiting Billing'),
+                    'notes' => 'Automatically created during patient registration'
+                ];
+                $visitId = createVisit($conn, $visitData);
+                if (!$visitId || !addInvoiceCharge($conn, $visitId, 'OPD registration and consultation', 'Consultation', 1, 50.00)) {
+                    $error = 'Patient was created, but the automatic OPD visit or billing record could not be created.';
+                }
+                logUserActivity($conn, $_SESSION['user_id'], 'Created Patient', "Created patient: {$data['first_name']} {$data['last_name']}");
+                if (!$error) {
+                    $message = 'Patient registered as OPD and added to billing successfully!';
+                    header('Location: patients.php?message=' . urlencode($message));
+                    exit();
+                }
+            } else {
+                $error = 'Failed to create patient. Please try again: ' . $stmt->error;
+            }
         }
     }
 }
@@ -240,61 +280,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
               relative_province = ?, relative_district_khan = ?, relative_commune_sangkat = ?, relative_postal_code = ?, relative_telephone_2 = ?, 
               primary_doctor_id = ?
               WHERE patient_id = ?";
-    $stmt = $conn->prepare($query);
-    $stmt->bind_param('sisssssissssssssssssssssssssisssisssssssssii',
-        $data['uhid_date'],
-        $data['new_born'],
-        $data['title'],
-        $data['first_name'],
-        $data['middle_name'],
-        $data['last_name'],
-        $data['date_of_birth'],
-        $data['gender_id'],
-        $data['marital_status'],
-        $data['occupation'],
-        $data['language'],
-        $data['religion'],
-        $data['nationality'],
-        $data['phone'],
-        $data['email'],
-        $data['loyalty_name'],
-        $data['loyalty_card_no'],
-        $data['loyalty_expiry_date'],
-        $data['national_id'],
-        $data['blood_group'],
-        $data['identity_type'],
-        $data['visa_validity'],
-        $data['address'],
-        $data['address_village'],
-        $data['province'],
-        $data['district_khan'],
-        $data['commune_sangkat'],
-        $data['postal_code'],
-        $data['postal_address_same'],
-        $data['telephone_2'],
-        $data['emergency_contact_name'],
-        $data['emergency_contact_phone'],
-        $data['relative_same_address'],
-        $data['relative_relationship'],
-        $data['relative_name'],
-        $data['relative_phone'],
-        $data['relative_address_village'],
-        $data['relative_province'],
-        $data['relative_district_khan'],
-        $data['relative_commune_sangkat'],
-        $data['relative_postal_code'],
-        $data['relative_telephone_2'],
-        $data['primary_doctor_id'],
-        $patientId
-    );
     
-    if ($stmt->execute()) {
-        logUserActivity($conn, $_SESSION['user_id'], 'Updated Patient', "Updated patient ID: {$patientId}");
-        $message = 'Patient updated successfully!';
-        header('Location: patients.php?message=' . urlencode($message));
-        exit();
+    $stmt = $conn->prepare($query);
+    if ($stmt === false) {
+        $error = 'Failed to prepare update statement: ' . $conn->error;
     } else {
-        $error = 'Failed to update patient. Please try again: ' . $stmt->error;
+        $stmt->bind_param('sisssssissssssssssssssssssssisssisssssssssii',
+            $data['uhid_date'],
+            $data['new_born'],
+            $data['title'],
+            $data['first_name'],
+            $data['middle_name'],
+            $data['last_name'],
+            $data['date_of_birth'],
+            $data['gender_id'],
+            $data['marital_status'],
+            $data['occupation'],
+            $data['language'],
+            $data['religion'],
+            $data['nationality'],
+            $data['phone'],
+            $data['email'],
+            $data['loyalty_name'],
+            $data['loyalty_card_no'],
+            $data['loyalty_expiry_date'],
+            $data['national_id'],
+            $data['blood_group'],
+            $data['identity_type'],
+            $data['visa_validity'],
+            $data['address'],
+            $data['address_village'],
+            $data['province'],
+            $data['district_khan'],
+            $data['commune_sangkat'],
+            $data['postal_code'],
+            $data['postal_address_same'],
+            $data['telephone_2'],
+            $data['emergency_contact_name'],
+            $data['emergency_contact_phone'],
+            $data['relative_same_address'],
+            $data['relative_relationship'],
+            $data['relative_name'],
+            $data['relative_phone'],
+            $data['relative_address_village'],
+            $data['relative_province'],
+            $data['relative_district_khan'],
+            $data['relative_commune_sangkat'],
+            $data['relative_postal_code'],
+            $data['relative_telephone_2'],
+            $data['primary_doctor_id'],
+            $patientId
+        );
+        
+        if ($stmt->execute()) {
+            logUserActivity($conn, $_SESSION['user_id'], 'Updated Patient', "Updated patient ID: {$patientId}");
+            $message = 'Patient updated successfully!';
+            header('Location: patients.php?message=' . urlencode($message));
+            exit();
+        } else {
+            $error = 'Failed to update patient. Please try again: ' . $stmt->error;
+        }
     }
 }
 
@@ -307,24 +352,28 @@ if (isset($_GET['action']) && $_GET['action'] === 'delete' && isset($_GET['id'])
     // Check if patient has visits
     $checkQuery = "SELECT COUNT(*) as count FROM visits WHERE patient_id = ?";
     $checkStmt = $conn->prepare($checkQuery);
-    $checkStmt->bind_param('i', $patientId);
-    $checkStmt->execute();
-    $checkResult = $checkStmt->get_result();
-    $checkRow = $checkResult->fetch_assoc();
-    
-    if ($checkRow['count'] > 0) {
-        $error = 'Cannot delete patient with existing visits. Please delete visits first.';
-    } else {
-        $query = "UPDATE patients SET is_active = 0 WHERE patient_id = ?";
-        $stmt = $conn->prepare($query);
-        $stmt->bind_param('i', $patientId);
-        if ($stmt->execute()) {
-            logUserActivity($conn, $_SESSION['user_id'], 'Deleted Patient', "Deleted patient ID: {$patientId}");
-            $message = 'Patient deleted successfully!';
-            header('Location: patients.php?message=' . urlencode($message));
-            exit();
+    if ($checkStmt) {
+        $checkStmt->bind_param('i', $patientId);
+        $checkStmt->execute();
+        $checkResult = $checkStmt->get_result();
+        $checkRow = $checkResult->fetch_assoc();
+        
+        if ($checkRow['count'] > 0) {
+            $error = 'Cannot delete patient with existing visits. Please delete visits first.';
         } else {
-            $error = 'Failed to delete patient. Please try again.';
+            $query = "UPDATE patients SET is_active = 0 WHERE patient_id = ?";
+            $stmt = $conn->prepare($query);
+            if ($stmt) {
+                $stmt->bind_param('i', $patientId);
+                if ($stmt->execute()) {
+                    logUserActivity($conn, $_SESSION['user_id'], 'Deleted Patient', "Deleted patient ID: {$patientId}");
+                    $message = 'Patient deleted successfully!';
+                    header('Location: patients.php?message=' . urlencode($message));
+                    exit();
+                } else {
+                    $error = 'Failed to delete patient. Please try again.';
+                }
+            }
         }
     }
 }
@@ -343,7 +392,8 @@ if ($searchTerm) {
               WHERE p.is_active = 1
               ORDER BY p.patient_id ASC
               LIMIT 50";
-    $patients = $conn->query($query)->fetch_all(MYSQLI_ASSOC);
+    $result = $conn->query($query);
+    $patients = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
 }
 
 // Get patient for edit
@@ -355,13 +405,16 @@ if (isset($_GET['action']) && $_GET['action'] === 'edit' && isset($_GET['id'])) 
               LEFT JOIN lookup_genders g ON p.gender_id = g.gender_id
               WHERE p.patient_id = ?";
     $stmt = $conn->prepare($query);
-    $stmt->bind_param('i', $patientId);
-    $stmt->execute();
-    $editPatient = $stmt->get_result()->fetch_assoc();
+    if ($stmt) {
+        $stmt->bind_param('i', $patientId);
+        $stmt->execute();
+        $editPatient = $stmt->get_result()->fetch_assoc();
+    }
 }
 
 // Get all genders for dropdown
-$genders = $conn->query("SELECT * FROM lookup_genders")->fetch_all(MYSQLI_ASSOC);
+$gendersResult = $conn->query("SELECT * FROM lookup_genders");
+$genders = $gendersResult ? $gendersResult->fetch_all(MYSQLI_ASSOC) : [];
 
 // Get messages
 if (isset($_GET['message'])) {
@@ -385,7 +438,7 @@ if (isset($_GET['message'])) {
             right: 0;
             bottom: 0;
             background: rgba(0,0,0,0.5);
-            display: <?php echo ($editPatient || isset($_GET['action']) && $_GET['action'] === 'create') ? 'flex' : 'none'; ?>;
+            display: <?php echo ($editPatient || (isset($_GET['action']) && $_GET['action'] === 'create')) ? 'flex' : 'none'; ?>;
             align-items: center;
             justify-content: center;
             z-index: 9999;
@@ -704,7 +757,7 @@ if (isset($_GET['message'])) {
                         <tbody>
                             <?php if (empty($patients)): ?>
                                 <tr>
-                                    <td colspan="7" style="text-align: center; color: #94a3b8; padding: 40px;">
+                                    <td colspan="6" style="text-align: center; color: #94a3b8; padding: 40px;">
                                         <i class="fas fa-inbox" style="font-size: 32px; display: block; margin-bottom: 8px;"></i>
                                         No patients found
                                     </td>
@@ -750,12 +803,12 @@ if (isset($_GET['message'])) {
     </div>
 
     <!-- Create/Edit Modal -->
-    <div class="form-modal" id="patientModal" style="display: <?php echo ($editPatient || isset($_GET['action']) && $_GET['action'] === 'create') ? 'flex' : 'none'; ?>;">
+    <div class="form-modal" id="patientModal" style="display: <?php echo ($editPatient || (isset($_GET['action']) && $_GET['action'] === 'create')) ? 'flex' : 'none'; ?>;">
         <div class="form-modal-content">
             <button class="close-btn" onclick="window.location.href='patients.php'">&times;</button>
             <h2 style="margin-bottom: 24px; color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px;"><?php echo $editPatient ? 'Edit Patient Details' : 'Patient Registration'; ?></h2>
             
-            <form method="POST" action="">
+            <form method="POST" action="" onsubmit="const btn = document.getElementById('patientSubmitBtn'); if (btn) { btn.disabled = true; btn.innerHTML = '<i class=&quot;fas fa-spinner fa-spin&quot;></i> Submitting...'; } return true;">
                 <input type="hidden" name="action" value="<?php echo $editPatient ? 'update' : 'create'; ?>">
                 <?php if ($editPatient): ?>
                     <input type="hidden" name="patient_id" value="<?php echo $editPatient['patient_id']; ?>">
@@ -1057,7 +1110,7 @@ if (isset($_GET['message'])) {
                 </div>
 
                 <div class="btn-group" style="margin-top: 24px;">
-                    <button type="submit" class="btn-submit">
+                    <button type="submit" id="patientSubmitBtn" class="btn-submit">
                         <i class="fas fa-save"></i> <?php echo $editPatient ? 'Update Patient' : 'Register Patient'; ?>
                     </button>
                     <button type="button" class="btn-cancel" onclick="window.location.href='patients.php'">Cancel</button>

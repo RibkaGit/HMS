@@ -30,7 +30,7 @@ if ($selectedVisitId > 0) {
 }
 
 // Get all patients for dropdown
-$patients = $conn->query("SELECT patient_id, patient_code, first_name, last_name FROM patients WHERE is_active = 1 ORDER BY first_name")->fetch_all(MYSQLI_ASSOC);
+$patients = $conn->query("SELECT patient_id, patient_code, first_name, last_name FROM patients WHERE is_active = 1 ORDER BY patient_id ASC")->fetch_all(MYSQLI_ASSOC);
 
 // Get all visits for dropdown
 $visits = $conn->query("SELECT v.visit_id, v.visit_code, CONCAT(p.first_name, ' ', p.last_name) as patient_name 
@@ -147,7 +147,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'create_prescription') {
     $visitId = intval($_POST['visit_id']);
     $patientId = intval($_POST['patient_id']);
-    $doctorId = intval($_POST['doctor_id']);
+    
+    $visitQuery = "SELECT attending_doctor_id FROM visits WHERE visit_id = ?";
+    $visitStmt = $conn->prepare($visitQuery);
+    $visitStmt->bind_param('i', $visitId);
+    $visitStmt->execute();
+    $visitRow = $visitStmt->get_result()->fetch_assoc();
+    $doctorId = !empty($visitRow['attending_doctor_id']) ? intval($visitRow['attending_doctor_id']) : intval($_POST['doctor_id']);
     
     $prescriptionQuery = "INSERT INTO prescriptions (visit_id, prescribed_by, status) VALUES (?, ?, 'Pending')";
     $presStmt = $conn->prepare($prescriptionQuery);
@@ -163,26 +169,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     $itemQuery = "INSERT INTO prescription_items (prescription_id, medication_id, dosage, duration_days, quantity) 
                                  VALUES (?, ?, ?, ?, ?)";
                     $itemStmt = $conn->prepare($itemQuery);
+                    $medicationId = intval($medication['medication_id']);
+                    $dosage = sanitizeInput($medication['dosage'] ?? '');
+                    $durationDays = !empty($medication['duration_days']) ? intval($medication['duration_days']) : null;
+                    $quantity = intval($medication['quantity'] ?? 1);
                     $itemStmt->bind_param('iisii', 
                         $prescriptionId,
-                        $medication['medication_id'],
-                        $medication['dosage'],
-                        $medication['duration_days'],
-                        $medication['quantity']
+                        $medicationId,
+                        $dosage,
+                        $durationDays,
+                        $quantity
                     );
                     if ($itemStmt->execute()) {
                         $addedItems++;
+                        $priceStmt = $conn->prepare("SELECT name, strength, unit_price FROM medications WHERE medication_id = ?");
+                        $priceStmt->bind_param('i', $medicationId);
+                        $priceStmt->execute();
+                        $medInfo = $priceStmt->get_result()->fetch_assoc();
+                        if ($medInfo) {
+                            addInvoiceCharge($conn, $visitId, 'Medication: ' . $medInfo['name'] . ' ' . $medInfo['strength'], 'Medication', $quantity, (float) $medInfo['unit_price']);
+                        }
                     }
                 }
             }
         }
         
         if ($addedItems > 0) {
+            $pharmacyFlag = $conn->prepare("UPDATE medical_records SET needs_pharmacy = 1 WHERE visit_id = ?");
+            $pharmacyFlag->bind_param('i', $visitId);
+            $pharmacyFlag->execute();
             logUserActivity($conn, $_SESSION['user_id'], 'Created Prescription', "Created prescription ID: {$prescriptionId} with {$addedItems} items");
-            $message = 'Prescription created successfully and sent to pharmacy!';
+            $message = 'Prescription created successfully and sent to pharmacy queue!';
             header('Location: medical_records.php?message=' . urlencode($message));
             exit();
         } else {
+            $deleteStmt = $conn->prepare("DELETE FROM prescriptions WHERE prescription_id = ?");
+            $deleteStmt->bind_param('i', $prescriptionId);
+            $deleteStmt->execute();
             $error = 'Please add at least one medication to the prescription.';
         }
     } else {
@@ -594,6 +617,11 @@ if (isset($_GET['message'])) {
             border-color: #fcd34d;
             color: #d97706;
         }
+        .referral-toggle.checked-pharmacy {
+            background: #ede9fe;
+            border-color: #c4b5fd;
+            color: #7c3aed;
+        }
         .referral-toggle a {
             color: inherit;
             text-decoration: none;
@@ -897,7 +925,7 @@ if (isset($_GET['message'])) {
                                             <label class="referral-toggle <?php echo !empty($record['needs_lab']) ? 'checked-lab' : ''; ?>" title="Mark patient for lab tests">
                                                 <input type="checkbox" class="flag-toggle" data-record-id="<?php echo $record['record_id']; ?>" data-flag="needs_lab" <?php echo !empty($record['needs_lab']) ? 'checked' : ''; ?>>
                                                 <?php if (!empty($record['needs_lab']) && $record['visit_id']): ?>
-                                                    <a href="lab.php?action=create&visit_id=<?php echo $record['visit_id']; ?>" title="Open lab page"><i class="fas fa-flask"></i> Lab</a>
+                                                    <a href="lab.php?action=sample_collect&visit_id=<?php echo $record['visit_id']; ?>" title="Open lab page"><i class="fas fa-flask"></i> Lab</a>
                                                 <?php else: ?>
                                                     <span><i class="fas fa-flask"></i> Lab</span>
                                                 <?php endif; ?>
@@ -921,7 +949,7 @@ if (isset($_GET['message'])) {
                                             <label class="referral-toggle <?php echo !empty($record['needs_pharmacy']) ? 'checked-pharmacy' : ''; ?>" title="Mark patient for pharmacy medicine">
                                                 <input type="checkbox" class="flag-toggle" data-record-id="<?php echo $record['record_id']; ?>" data-flag="needs_pharmacy" <?php echo !empty($record['needs_pharmacy']) ? 'checked' : ''; ?>>
                                                 <?php if (!empty($record['needs_pharmacy']) && $record['visit_id']): ?>
-                                                    <a href="pharmacy.php?visit_id=<?php echo $record['visit_id']; ?>" title="Open pharmacy"><i class="fas fa-pills"></i> Pharmacy</a>
+                                                    <a href="medical_records.php?action=create_prescription&visit_id=<?php echo $record['visit_id']; ?>" title="Create prescription"><i class="fas fa-pills"></i> Pharmacy</a>
                                                 <?php else: ?>
                                                     <span><i class="fas fa-pills"></i> Pharmacy</span>
                                                 <?php endif; ?>
@@ -1207,6 +1235,7 @@ if (isset($_GET['message'])) {
                     label.classList.toggle('checked-lab', flag === 'needs_lab' && checkbox.checked);
                     label.classList.toggle('checked-radiology', flag === 'needs_radiology' && checkbox.checked);
                     label.classList.toggle('checked-bed', flag === 'needs_bed' && checkbox.checked);
+                    label.classList.toggle('checked-pharmacy', flag === 'needs_pharmacy' && checkbox.checked);
                     window.location.reload();
                 })
                 .catch(function() {

@@ -40,11 +40,14 @@ foreach ($testTypes as $test) {
 $orderStatuses = $conn->query("SELECT * FROM lookup_order_statuses")->fetch_all(MYSQLI_ASSOC);
 
 // ============================================================================
-// CREATE LAB ORDER
+// SAMPLE COLLECT (create lab order with collected status)
 // ============================================================================
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'create') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'sample_collect') {
     $visitId = intval($_POST['visit_id']);
     $testTypeIds = array_map('intval', $_POST['test_type_ids'] ?? []);
+    $sampleIds = $_POST['sample_ids'] ?? [];
+    
+    ensureVisitMrId($conn, $visitId);
     
     // Get the attending doctor from the visit
     $visitQuery = "SELECT attending_doctor_id FROM visits WHERE visit_id = ?";
@@ -54,14 +57,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $visit = $visitStmt->get_result()->fetch_assoc();
     $orderedBy = $visit['attending_doctor_id'] ? intval($visit['attending_doctor_id']) : intval($_SESSION['user_id']);
     
-    $orderStatusId = getLookupId($conn, 'lookup_order_statuses', 'name', 'Ordered');
+    $orderStatusId = getLookupId($conn, 'lookup_order_statuses', 'name', 'Sample Collected');
     $createdCount = 0;
     foreach ($testTypeIds as $testTypeId) {
         $data = [
             'visit_id' => $visitId,
             'test_type_id' => $testTypeId,
             'ordered_by' => $orderedBy,
-            'order_status_id' => $orderStatusId
+            'order_status_id' => $orderStatusId,
+            'sample_id' => !empty($sampleIds[$testTypeId]) ? sanitizeInput($sampleIds[$testTypeId]) : null
         ];
         if (createLabOrder($conn, $data)) {
             $createdCount++;
@@ -81,12 +85,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $clearLabFlag = $conn->prepare("UPDATE medical_records SET needs_lab = 0 WHERE visit_id = ?");
         $clearLabFlag->bind_param('i', $visitId);
         $clearLabFlag->execute();
-        logUserActivity($conn, $_SESSION['user_id'], 'Created Lab Orders', "Created {$createdCount} lab order(s) for visit ID: {$visitId}");
+        logUserActivity($conn, $_SESSION['user_id'], 'Sample Collected', "Collected {$createdCount} sample(s) for visit ID: {$visitId}");
         if (isset($_POST['next']) && $_POST['next'] === 'bed') {
             header('Location: bed_management.php?action=assign_bed&visit_id=' . $visitId);
             exit();
         }
-        $message = 'Lab order created successfully!';
+        $message = 'Sample collected successfully!';
         header('Location: lab.php?message=' . urlencode($message));
         exit();
     } else {
@@ -255,7 +259,7 @@ if (!empty($params)) {
 $stmt->execute();
 $labOrders = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
-// Group orders by patient/visit
+// Group orders by patient/visit and split by collection status
 $groupedOrders = [];
 foreach ($labOrders as $order) {
     $key = $order['visit_id'];
@@ -263,6 +267,7 @@ foreach ($labOrders as $order) {
         $groupedOrders[$key] = [
             'visit_id' => $order['visit_id'],
             'visit_code' => $order['visit_code'],
+            'mr_id' => $order['mr_id'] ?? '',
             'patient_id' => $order['patient_id'],
             'patient_name' => $order['patient_name'],
             'patient_code' => $order['patient_code'],
@@ -271,6 +276,28 @@ foreach ($labOrders as $order) {
         ];
     }
     $groupedOrders[$key]['tests'][] = $order;
+}
+
+$awaitingSampleGroups = [];
+$sampleCollectedGroups = [];
+foreach ($groupedOrders as $key => $group) {
+    $hasOrdered = false;
+    $hasCollected = false;
+    foreach ($group['tests'] as $test) {
+        if ($test['status_name'] === 'Ordered') {
+            $hasOrdered = true;
+        }
+        if ($test['status_name'] === 'Sample Collected') {
+            $hasCollected = true;
+        }
+    }
+    if ($hasOrdered) {
+        $awaitingSampleGroups[$key] = $group;
+    } elseif ($hasCollected) {
+        $sampleCollectedGroups[$key] = $group;
+    } else {
+        $sampleCollectedGroups[$key] = $group;
+    }
 }
 
 // Patients referred from medical records (needs lab)
@@ -320,7 +347,7 @@ if (!empty($labOrders)) {
             right: 0;
             bottom: 0;
             background: rgba(0,0,0,0.5);
-            display: <?php echo (isset($_GET['action']) && ($_GET['action'] === 'create' || $_GET['action'] === 'result')) ? 'flex' : 'none'; ?>;
+            display: <?php echo (isset($_GET['action']) && ($_GET['action'] === 'sample_collect' || $_GET['action'] === 'create' || $_GET['action'] === 'result')) ? 'flex' : 'none'; ?>;
             align-items: center;
             justify-content: center;
             z-index: 9999;
@@ -638,9 +665,6 @@ if (!empty($labOrders)) {
                         <?php endif; ?>
                     </form>
                 </div>
-                <button class="btn-create" onclick="window.location.href='lab.php?action=create'">
-                    <i class="fas fa-plus"></i> New Lab Order
-                </button>
             </div>
 
             <?php if (!empty($pendingLabPatients)): ?>
@@ -657,8 +681,8 @@ if (!empty($labOrders)) {
                                 <?php if ($pending['diagnosis']): ?> · <?php echo htmlspecialchars($pending['diagnosis']); ?><?php endif; ?>
                             </small>
                         </div>
-                        <a href="lab.php?action=create&visit_id=<?php echo $pending['visit_id']; ?>" class="btn-order-lab">
-                            <i class="fas fa-flask"></i> Create Lab Order
+                        <a href="lab.php?action=sample_collect&visit_id=<?php echo $pending['visit_id']; ?>" class="btn-order-lab">
+                            <i class="fas fa-vial"></i> Sample Collect
                         </a>
                     </div>
                     <?php endforeach; ?>
@@ -676,7 +700,10 @@ if (!empty($labOrders)) {
                 <a href="lab.php?status=Cancelled" class="filter-tab <?php echo $filterStatus === 'Cancelled' ? 'active' : ''; ?>">Cancelled</a>
             </div>
 
-            <div class="table-card">
+            <div class="table-card" style="margin-bottom: 24px;">
+                <h3 style="margin: 0 0 16px; font-size: 18px; color: #2563eb;">
+                    <i class="fas fa-vial"></i> Awaiting Sample Collection (<?php echo count($awaitingSampleGroups); ?>)
+                </h3>
                 <div class="table-responsive">
                     <table class="recent-table">
                         <thead>
@@ -685,20 +712,18 @@ if (!empty($labOrders)) {
                                 <th>Visit</th>
                                 <th>Tests</th>
                                 <th>Ordered By</th>
-                                <th>Status</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            <?php if (empty($groupedOrders)): ?>
+                            <?php if (empty($awaitingSampleGroups)): ?>
                                 <tr>
-                                    <td colspan="6" style="text-align: center; color: #94a3b8; padding: 40px;">
-                                        <i class="fas fa-flask" style="font-size: 32px; display: block; margin-bottom: 8px;"></i>
-                                        No lab orders found
+                                    <td colspan="5" style="text-align: center; color: #94a3b8; padding: 32px;">
+                                        No orders awaiting sample collection
                                     </td>
                                 </tr>
                             <?php else: ?>
-                                <?php foreach ($groupedOrders as $group): ?>
+                                <?php foreach ($awaitingSampleGroups as $group): ?>
                                 <tr>
                                     <td>
                                         <div class="patient-info">
@@ -720,10 +745,84 @@ if (!empty($labOrders)) {
                                     <td>
                                         <div style="display: flex; flex-direction: column; gap: 4px;">
                                             <?php foreach ($group['tests'] as $test): ?>
+                                                <?php if ($test['status_name'] === 'Ordered'): ?>
                                                 <div style="font-size: 13px;">
                                                     <?php echo htmlspecialchars($test['test_name']); ?>
+                                                </div>
+                                                <?php endif; ?>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    </td>
+                                    <td><?php echo htmlspecialchars($group['ordered_by_name']); ?></td>
+                                    <td>
+                                        <div class="action-buttons">
+                                            <a href="lab.php?action=sample_collect&visit_id=<?php echo $group['visit_id']; ?>" class="btn-result">
+                                                <i class="fas fa-vial"></i> Sample Collect
+                                            </a>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="table-card">
+                <h3 style="margin: 0 0 16px; font-size: 18px; color: #d97706;">
+                    <i class="fas fa-check-circle"></i> Sample Collected List (<?php echo count($sampleCollectedGroups); ?>)
+                </h3>
+                <div class="table-responsive">
+                    <table class="recent-table">
+                        <thead>
+                            <tr>
+                                <th>Patient</th>
+                                <th>Visit</th>
+                                <th>Tests</th>
+                                <th>Ordered By</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($sampleCollectedGroups)): ?>
+                                <tr>
+                                    <td colspan="6" style="text-align: center; color: #94a3b8; padding: 40px;">
+                                        <i class="fas fa-flask" style="font-size: 32px; display: block; margin-bottom: 8px;"></i>
+                                        No collected samples yet
+                                    </td>
+                                </tr>
+                            <?php else: ?>
+                                <?php foreach ($sampleCollectedGroups as $group): ?>
+                                <tr>
+                                    <td>
+                                        <div class="patient-info">
+                                            <div class="avatar" style="background: <?php echo getUserColor($group['patient_name']); ?>; width: 32px; height: 32px; font-size: 12px;">
+                                                <?php echo strtoupper(substr($group['patient_name'], 0, 1)); ?>
+                                            </div>
+                                            <div>
+                                                <span class="patient-name"><?php echo htmlspecialchars($group['patient_name']); ?></span>
+                                                <small><?php echo htmlspecialchars($group['patient_code']); ?></small>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div><?php echo htmlspecialchars($group['visit_code']); ?></div>
+                                        <?php if(!empty($group['mr_id'])): ?>
+                                            <small style="color: #64748b; font-size: 11px;"><?php echo htmlspecialchars($group['mr_id']); ?></small>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                                            <?php foreach ($group['tests'] as $test): ?>
+                                                <div style="font-size: 13px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                                                    <?php echo htmlspecialchars($test['test_name']); ?>
                                                     <?php if(!empty($test['sample_id'])): ?>
-                                                        <span style="color: #64748b; font-size: 11px; margin-left: 4px;">(<?php echo htmlspecialchars($test['sample_id']); ?>)</span>
+                                                        <span style="color: #64748b; font-size: 11px;">(<?php echo htmlspecialchars($test['sample_id']); ?>)</span>
+                                                        <?php if(!empty($group['mr_id'])): ?>
+                                                            <button type="button" onclick="printSampleLabel('<?php echo htmlspecialchars($group['mr_id'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($test['sample_id'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($group['visit_code'], ENT_QUOTES); ?>')" style="padding: 1px 6px; font-size: 10px; background: #dbeafe; color: #2563eb; border: none; border-radius: 4px; cursor: pointer;" title="Print Label"><i class="fas fa-print"></i></button>
+                                                        <?php endif; ?>
                                                     <?php endif; ?>
                                                     <span class="status-badge-lab status-<?php echo strtolower(str_replace(' ', '', $test['status_name'])); ?>" style="font-size: 10px; padding: 2px 6px;">
                                                         <?php echo htmlspecialchars($test['status_name']); ?>
@@ -741,14 +840,14 @@ if (!empty($labOrders)) {
                                             if ($test['status_name'] !== 'Result Ready' && $test['status_name'] !== 'Reviewed') {
                                                 $allComplete = false;
                                             }
-                                            if ($test['status_name'] === 'Ordered' || $test['status_name'] === 'Sample Collected') {
+                                            if ($test['status_name'] === 'Sample Collected') {
                                                 $anyInProgress = true;
                                             }
                                         }
                                         if ($allComplete) {
                                             echo '<span class="status-badge-lab status-resultready">Complete</span>';
                                         } elseif ($anyInProgress) {
-                                            echo '<span class="status-badge-lab status-ordered">In Progress</span>';
+                                            echo '<span class="status-badge-lab status-samplecollected">Processing</span>';
                                         } else {
                                             echo '<span class="status-badge-lab status-reviewed">Reviewed</span>';
                                         }
@@ -757,7 +856,7 @@ if (!empty($labOrders)) {
                                     <td>
                                         <div class="action-buttons">
                                             <?php if(!empty($group['mr_id'])): ?>
-                                                <button onclick="printSampleLabel('<?php echo htmlspecialchars($group['mr_id']); ?>', '<?php echo htmlspecialchars($group['visit_code']); ?>')" class="btn-print" title="Print Sample Label">
+                                                <button type="button" onclick="printSampleLabel('<?php echo htmlspecialchars($group['mr_id'], ENT_QUOTES); ?>', '', '<?php echo htmlspecialchars($group['visit_code'], ENT_QUOTES); ?>')" class="btn-print" title="Print Sample Label">
                                                     <i class="fas fa-print"></i> Print
                                                 </button>
                                             <?php endif; ?>
@@ -784,7 +883,7 @@ if (!empty($labOrders)) {
                         lr.result_value, lr.result_notes, lr.entered_at,
                         CONCAT(p.first_name, ' ', p.last_name) as patient_name,
                         p.patient_code,
-                        v.visit_code
+                        v.visit_code, v.mr_id
                         FROM lab_orders lo
                         JOIN lookup_test_types vt ON lo.test_type_id = vt.test_type_id
                         JOIN lookup_order_statuses os ON lo.order_status_id = os.order_status_id
@@ -818,10 +917,13 @@ if (!empty($labOrders)) {
                     <?php foreach ($visitTests as $test): ?>
                     <div style="background: #fff; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                            <h3 style="margin: 0; font-size: 16px;">
+                            <h3 style="margin: 0; font-size: 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                                 <?php echo htmlspecialchars($test['test_name']); ?>
                                 <?php if(!empty($test['sample_id'])): ?>
-                                    <span style="color: #64748b; font-size: 12px; margin-left: 8px;">Sample ID: <?php echo htmlspecialchars($test['sample_id']); ?></span>
+                                    <span style="color: #64748b; font-size: 12px;">Sample ID: <?php echo htmlspecialchars($test['sample_id']); ?></span>
+                                    <?php if(!empty($visitInfo['mr_id'])): ?>
+                                        <button type="button" onclick="printSampleLabel('<?php echo htmlspecialchars($visitInfo['mr_id'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($test['sample_id'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($visitInfo['visit_code'], ENT_QUOTES); ?>')" style="padding: 2px 8px; font-size: 11px; background: #dbeafe; color: #2563eb; border: none; border-radius: 4px; cursor: pointer;"><i class="fas fa-print"></i> Print Label</button>
+                                    <?php endif; ?>
                                 <?php endif; ?>
                             </h3>
                             <span class="status-badge-lab status-<?php echo strtolower(str_replace(' ', '', $test['status_name'])); ?>">
@@ -880,15 +982,22 @@ if (!empty($labOrders)) {
     </div>
     <?php endif; ?>
 
-    <!-- Create Lab Order Modal -->
-    <?php if (isset($_GET['action']) && $_GET['action'] === 'create'): ?>
+    <!-- Sample Collect Modal -->
+    <?php if (isset($_GET['action']) && ($_GET['action'] === 'sample_collect' || $_GET['action'] === 'create')): ?>
+    <?php
+        $nextSampleId = getNextSampleIdPreview($conn);
+        $createMrId = '';
+        if ($selectedVisitId > 0) {
+            $createMrId = ensureVisitMrId($conn, $selectedVisitId);
+        }
+    ?>
     <div class="form-modal" style="display: flex;">
         <div class="form-modal-content">
             <button class="close-btn" onclick="window.location.href='lab.php'">&times;</button>
-            <h2 style="margin-bottom: 24px;">Create New Lab Order</h2>
+            <h2 style="margin-bottom: 24px;">Sample Collect</h2>
             
             <form method="POST" action="">
-                <input type="hidden" name="action" value="create">
+                <input type="hidden" name="action" value="sample_collect">
                 <?php if (isset($_GET['next']) && $_GET['next'] === 'bed'): ?>
                     <input type="hidden" name="next" value="bed">
                 <?php endif; ?>
@@ -920,9 +1029,16 @@ if (!empty($labOrders)) {
                                 <h4 style="margin-top: 0; margin-bottom: 8px; color: #1e293b; font-size: 14px; border-bottom: 2px solid #cbd5e1; padding-bottom: 4px;"><?php echo htmlspecialchars($subCat); ?></h4>
                                 <div class="test-checklist" style="max-height: 200px; overflow-y: auto;">
                                     <?php foreach ($tests as $test): ?>
-                                        <label style="display: flex; align-items: flex-start; gap: 8px; margin: 6px 0; font-size: 13px; cursor: pointer;">
-                                            <input type="checkbox" name="test_type_ids[]" value="<?php echo $test['test_type_id']; ?>" style="margin-top: 2px; width: auto;">
+                                        <label class="lab-test-label" style="display: flex; align-items: flex-start; gap: 8px; margin: 6px 0; font-size: 13px; cursor: pointer; flex-wrap: wrap;">
+                                            <input type="checkbox" class="lab-test-checkbox" name="test_type_ids[]" value="<?php echo $test['test_type_id']; ?>" data-test-id="<?php echo $test['test_type_id']; ?>" style="margin-top: 2px; width: auto;">
                                             <span><?php echo htmlspecialchars($test['name']); ?> <br><small style="color:#64748b;">Birr <?php echo number_format($test['price'], 2); ?></small></span>
+                                            <span class="sample-id-display" style="display: none; align-items: center; gap: 6px; margin-left: auto;">
+                                                <input type="hidden" class="sample-id-input" name="sample_ids[<?php echo $test['test_type_id']; ?>]" value="">
+                                                <code class="sample-id-text" style="font-size: 11px; background: #e0e7ff; padding: 2px 6px; border-radius: 4px;"></code>
+                                                <button type="button" class="btn-print-sample" style="padding: 2px 8px; font-size: 11px; background: #dbeafe; color: #2563eb; border: none; border-radius: 4px; cursor: pointer;" title="Print Label">
+                                                    <i class="fas fa-print"></i>
+                                                </button>
+                                            </span>
                                         </label>
                                     <?php endforeach; ?>
                                 </div>
@@ -933,7 +1049,7 @@ if (!empty($labOrders)) {
                 
                 <div class="btn-group">
                     <button type="submit" class="btn-submit">
-                        <i class="fas fa-save"></i> Create Lab Order
+                        <i class="fas fa-vial"></i> Save Sample Collect
                     </button>
                     <button type="button" class="btn-cancel" onclick="window.location.href='lab.php'">Cancel</button>
                 </div>
@@ -993,7 +1109,53 @@ if (!empty($labOrders)) {
 
     <script src="assets/js/dashboard.js"></script>
     <script>
-    function printSampleLabel(mrId, visitCode) {
+    (function() {
+        const nextSamplePreview = <?php echo json_encode($nextSampleId ?? getNextSampleIdPreview($conn)); ?>;
+        const createMrId = <?php echo json_encode($createMrId ?? ''); ?>;
+        let sampleCounter = 0;
+        const match = nextSamplePreview.match(/SMP-\d+-(\d+)/);
+        if (match) {
+            sampleCounter = parseInt(match[1], 10) - 1;
+        }
+
+        function generateNextSampleId() {
+            sampleCounter++;
+            const year = new Date().getFullYear().toString().slice(-2);
+            return 'SMP-' + year + '-' + String(sampleCounter).padStart(4, '0');
+        }
+
+        function getMrIdForForm() {
+            const visitSelect = document.getElementById('visit_id');
+            return createMrId || '';
+        }
+
+        document.querySelectorAll('.lab-test-checkbox').forEach(function(checkbox) {
+            checkbox.addEventListener('change', function() {
+                const label = this.closest('.lab-test-label');
+                const display = label.querySelector('.sample-id-display');
+                const hiddenInput = label.querySelector('.sample-id-input');
+                const textEl = label.querySelector('.sample-id-text');
+                const printBtn = label.querySelector('.btn-print-sample');
+
+                if (this.checked) {
+                    const sampleId = generateNextSampleId();
+                    hiddenInput.value = sampleId;
+                    textEl.textContent = sampleId;
+                    display.style.display = 'inline-flex';
+                    printBtn.onclick = function(e) {
+                        e.preventDefault();
+                        printSampleLabel(getMrIdForForm(), sampleId, '');
+                    };
+                } else {
+                    hiddenInput.value = '';
+                    textEl.textContent = '';
+                    display.style.display = 'none';
+                }
+            });
+        });
+    })();
+
+    function printSampleLabel(mrId, sampleId, visitCode) {
         const printWindow = window.open('', '_blank');
         printWindow.document.write(`
             <html>
@@ -1012,20 +1174,19 @@ if (!empty($labOrders)) {
                 <div class="label">
                     <div class="label-header">HOSPITAL SAMPLE LABEL</div>
                     <div class="label-row">
-                        <span class="label-label">MR ID:</span> ${mrId}
+                        <span class="label-label">MR ID:</span> ${mrId || 'N/A'}
                     </div>
-                    <div class="label-row">
-                        <span class="label-label">Visit Code:</span> ${visitCode}
-                    </div>
+                    ${sampleId ? `<div class="label-row"><span class="label-label">Sample ID:</span> ${sampleId}</div>` : ''}
+                    ${visitCode ? `<div class="label-row"><span class="label-label">Visit Code:</span> ${visitCode}</div>` : ''}
                     <div class="label-row">
                         <span class="label-label">Date:</span> ${new Date().toLocaleDateString()}
                     </div>
-                    <div class="barcode">${mrId}</div>
+                    <div class="barcode">${sampleId || mrId}</div>
                 </div>
                 <script>
                     window.print();
                     window.onafterprint = function() { window.close(); };
-                </script>
+                <\/script>
             </body>
             </html>
         `);

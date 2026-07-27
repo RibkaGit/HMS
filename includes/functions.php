@@ -701,7 +701,7 @@ function searchPatients($conn, $searchTerm) {
               OR p.patient_code LIKE ?
               OR p.phone LIKE ?
               OR p.email LIKE ?
-              ORDER BY p.last_name, p.first_name";
+              ORDER BY p.patient_id ASC";
     $stmt = $conn->prepare($query);
     $stmt->bind_param('sssss', $searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm);
     $stmt->execute();
@@ -752,12 +752,14 @@ function generateVisitCode($conn) {
 }
 
 function createVisit($conn, $data) {
-    $query = "INSERT INTO visits (visit_code, patient_id, visit_type_id, department_id, 
+    $mrId = generateMrId($conn);
+    $query = "INSERT INTO visits (visit_code, mr_id, patient_id, visit_type_id, department_id, 
               attending_doctor_id, visit_status_id, notes) 
-              VALUES (?, ?, ?, ?, ?, ?, ?)";
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
     $stmt = $conn->prepare($query);
-    $stmt->bind_param('siiiiis', 
+    $stmt->bind_param('ssiiiiis', 
         $data['visit_code'],
+        $mrId,
         $data['patient_id'],
         $data['visit_type_id'],
         $data['department_id'],
@@ -1205,6 +1207,7 @@ function getPatientHistory($conn, $patientId) {
                  JOIN lookup_order_statuses os ON lo.order_status_id = os.order_status_id
                  JOIN visits v ON lo.visit_id = v.visit_id
                  WHERE v.patient_id = ?
+                 AND lo.sample_id IS NOT NULL AND lo.sample_id != ''
                  ORDER BY lo.ordered_at DESC";
     $labStmt = $conn->prepare($labQuery);
     $labStmt->bind_param('i', $patientId);

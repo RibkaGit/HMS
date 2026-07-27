@@ -19,21 +19,8 @@ $userInitial = strtoupper(substr($userName, 0, 1));
 
 $message = '';
 $error = '';
-$selectedVisitId = isset($_GET['visit_id']) ? intval($_GET['visit_id']) : 0;
 
-// Get all medications
 $medications = $conn->query("SELECT * FROM medications WHERE is_active = 1 ORDER BY name")->fetch_all(MYSQLI_ASSOC);
-
-// Get visits for prescription
-$visits = $conn->query("SELECT v.visit_id, v.visit_code, v.attending_doctor_id, p.first_name, p.last_name, d.first_name as doc_first, d.last_name as doc_last
-                        FROM visits v 
-                        JOIN patients p ON v.patient_id = p.patient_id 
-                        LEFT JOIN staff d ON v.attending_doctor_id = d.staff_id
-                        WHERE v.visit_status_id != (SELECT visit_status_id FROM lookup_visit_statuses WHERE name = 'Discharged')
-                        ORDER BY v.admitted_at DESC LIMIT 100")->fetch_all(MYSQLI_ASSOC);
-
-// Get doctors
-$doctors = $conn->query("SELECT staff_id, first_name, last_name FROM staff WHERE role_id = (SELECT role_id FROM lookup_roles WHERE name = 'Doctor') AND is_active = 1")->fetch_all(MYSQLI_ASSOC);
 
 // ============================================================================
 // ADD MEDICATION
@@ -94,63 +81,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 }
 
 // ============================================================================
-// CREATE PRESCRIPTION
-// ============================================================================
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'create_prescription') {
-    $data = [
-        'visit_id' => intval($_POST['visit_id']),
-        'prescribed_by' => intval($_POST['prescribed_by']),
-        'status' => 'Pending'
-    ];
-    
-    $prescriptionId = createPrescription($conn, $data);
-    if ($prescriptionId) {
-        // Add prescription items
-        $medicationIds = $_POST['medication_id'] ?? [];
-        $dosages = $_POST['dosage'] ?? [];
-        $durations = $_POST['duration_days'] ?? [];
-        $quantities = $_POST['quantity'] ?? [];
-        
-        for ($i = 0; $i < count($medicationIds); $i++) {
-            if (!empty($medicationIds[$i])) {
-                $itemData = [
-                    'prescription_id' => $prescriptionId,
-                    'medication_id' => intval($medicationIds[$i]),
-                    'dosage' => sanitizeInput($dosages[$i] ?? ''),
-                    'duration_days' => !empty($durations[$i]) ? intval($durations[$i]) : null,
-                    'quantity' => intval($quantities[$i] ?? 1)
-                ];
-                if (addPrescriptionItem($conn, $itemData)) {
-                    $priceStmt = $conn->prepare("SELECT name, strength, unit_price FROM medications WHERE medication_id = ?");
-                    $priceStmt->bind_param('i', $itemData['medication_id']);
-                    $priceStmt->execute();
-                    $medication = $priceStmt->get_result()->fetch_assoc();
-                    if ($medication) {
-                        addInvoiceCharge($conn, $data['visit_id'], 'Medication: ' . $medication['name'] . ' ' . $medication['strength'], 'Medication', $itemData['quantity'], (float) $medication['unit_price']);
-                    }
-                }
-            }
-        }
-        
-        $clearPharmacyFlag = $conn->prepare("UPDATE medical_records SET needs_pharmacy = 0 WHERE visit_id = ?");
-        $clearPharmacyFlag->bind_param('i', $data['visit_id']);
-        $clearPharmacyFlag->execute();
-        
-        logUserActivity($conn, $_SESSION['user_id'], 'Created Prescription', "Created prescription ID: {$prescriptionId}");
-        $message = 'Prescription created successfully!';
-        header('Location: pharmacy.php?message=' . urlencode($message));
-        exit();
-    } else {
-        $error = 'Failed to create prescription. Please try again.';
-    }
-}
-
-// ============================================================================
 // DISPENSE PRESCRIPTION
 // ============================================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'dispense') {
     $prescriptionId = intval($_POST['prescription_id']);
     
+    $visitStmt = $conn->prepare("SELECT visit_id FROM prescriptions WHERE prescription_id = ?");
+    $visitStmt->bind_param('i', $prescriptionId);
+    $visitStmt->execute();
+    $prescriptionRow = $visitStmt->get_result()->fetch_assoc();
+    
+    if (!$prescriptionRow || !isVisitPaid($conn, (int) $prescriptionRow['visit_id'])) {
+        $error = 'Payment is required before dispensing. Please ensure the patient invoice is paid.';
+    } else {
     // Get prescription items
     $items = getMedicationsByPrescription($conn, $prescriptionId);
     $canDispense = true;
@@ -183,6 +126,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $stmt->bind_param('ii', $_SESSION['user_id'], $prescriptionId);
         
         if ($stmt->execute()) {
+            $clearPharmacyFlag = $conn->prepare("UPDATE medical_records SET needs_pharmacy = 0 WHERE visit_id = ?");
+            $clearPharmacyFlag->bind_param('i', $prescriptionRow['visit_id']);
+            $clearPharmacyFlag->execute();
             logUserActivity($conn, $_SESSION['user_id'], 'Dispensed Prescription', "Dispensed prescription ID: {$prescriptionId}");
             $message = 'Prescription dispensed successfully!';
             header('Location: pharmacy.php?message=' . urlencode($message));
@@ -190,6 +136,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         } else {
             $error = 'Failed to dispense prescription. Please try again.';
         }
+    }
     }
 }
 
@@ -237,6 +184,35 @@ if (!empty($params)) {
 $stmt->execute();
 $prescriptions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
+// Compute payment status per prescription visit
+$prescriptionPaymentStatus = [];
+foreach ($prescriptions as $prescription) {
+    $prescriptionPaymentStatus[$prescription['prescription_id']] = isVisitPaid($conn, (int) $prescription['visit_id']);
+}
+
+// Get prescription for view modal
+$viewPrescription = null;
+$viewPrescriptionItems = [];
+if (isset($_GET['action']) && $_GET['action'] === 'view_prescription' && isset($_GET['id'])) {
+    $viewPresId = intval($_GET['id']);
+    $viewStmt = $conn->prepare("SELECT p.*, 
+          CONCAT(pat.first_name, ' ', pat.last_name) as patient_name,
+          pat.patient_code,
+          CONCAT(s.first_name, ' ', s.last_name) as doctor_name,
+          v.visit_code
+          FROM prescriptions p
+          JOIN visits v ON p.visit_id = v.visit_id
+          JOIN patients pat ON v.patient_id = pat.patient_id
+          JOIN staff s ON p.prescribed_by = s.staff_id
+          WHERE p.prescription_id = ?");
+    $viewStmt->bind_param('i', $viewPresId);
+    $viewStmt->execute();
+    $viewPrescription = $viewStmt->get_result()->fetch_assoc();
+    if ($viewPrescription) {
+        $viewPrescriptionItems = getMedicationsByPrescription($conn, $viewPresId);
+    }
+}
+
 // Get prescription items
 $prescriptionItems = [];
 if (!empty($prescriptions)) {
@@ -270,7 +246,7 @@ if (isset($_GET['message'])) {
 // Get low stock medications
 $lowStock = $conn->query("SELECT * FROM medications WHERE stock_quantity <= reorder_level AND is_active = 1 ORDER BY stock_quantity ASC")->fetch_all(MYSQLI_ASSOC);
 
-// Patients referred from medical records (needs pharmacy)
+// Patients waiting for doctor to write prescription (referred but no pending Rx yet)
 $pendingPharmacyQuery = "SELECT mr.record_id, mr.visit_id, mr.diagnosis, mr.created_at,
                            CONCAT(p.first_name, ' ', p.last_name) as patient_name,
                            p.patient_code,
@@ -280,7 +256,8 @@ $pendingPharmacyQuery = "SELECT mr.record_id, mr.visit_id, mr.diagnosis, mr.crea
                     JOIN patients p ON mr.patient_id = p.patient_id
                     JOIN visits v ON mr.visit_id = v.visit_id
                     JOIN staff d ON mr.doctor_id = d.staff_id
-                    WHERE mr.needs_pharmacy = 1
+                    LEFT JOIN prescriptions pr ON pr.visit_id = mr.visit_id AND pr.status = 'Pending'
+                    WHERE mr.needs_pharmacy = 1 AND pr.prescription_id IS NULL
                     ORDER BY mr.created_at ASC";
 $pendingPharmacyPatients = $conn->query($pendingPharmacyQuery)->fetch_all(MYSQLI_ASSOC);
 ?>
@@ -301,7 +278,7 @@ $pendingPharmacyPatients = $conn->query($pendingPharmacyQuery)->fetch_all(MYSQLI
             right: 0;
             bottom: 0;
             background: rgba(0,0,0,0.5);
-            display: <?php echo (isset($_GET['action']) && ($_GET['action'] === 'add_medication' || $_GET['action'] === 'edit_medication' || $_GET['action'] === 'create_prescription')) ? 'flex' : 'none'; ?>;
+            display: <?php echo (isset($_GET['action']) && ($_GET['action'] === 'add_medication' || $_GET['action'] === 'edit_medication' || $_GET['action'] === 'view_prescription')) ? 'flex' : 'none'; ?>;
             align-items: center;
             justify-content: center;
             z-index: 9999;
@@ -498,6 +475,19 @@ $pendingPharmacyPatients = $conn->query($pendingPharmacyQuery)->fetch_all(MYSQLI
         .status-pending { background: #fef3c7; color: #d97706; }
         .status-dispensed { background: #d1fae5; color: #059669; }
         .status-cancelled { background: #fee2e2; color: #dc2626; }
+        .status-paid { background: #d1fae5; color: #059669; }
+        .status-unpaid { background: #fee2e2; color: #dc2626; }
+        .btn-view {
+            background: #ede9fe;
+            color: #7c3aed;
+        }
+        .btn-view:hover {
+            background: #ddd6fe;
+        }
+        .btn-dispense:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
         
         .filter-tabs {
             display: flex;
@@ -689,14 +679,14 @@ $pendingPharmacyPatients = $conn->query($pendingPharmacyQuery)->fetch_all(MYSQLI
             <?php endif; ?>
 
             <?php if (!empty($pendingPharmacyPatients)): ?>
-            <div class="table-card" style="border: 2px solid #3b82f6; background: #eff6ff; margin-bottom: 24px;">
+            <div class="table-card" style="border: 2px solid #f59e0b; background: #fffbeb; margin-bottom: 24px;">
                 <details open>
-                    <summary style="cursor: pointer; padding: 14px 0; font-size: 18px; font-weight: 700; color: #1d4ed8;">
-                        <i class="fas fa-prescription"></i> Waiting for Pharmacy (<?php echo count($pendingPharmacyPatients); ?>)
+                    <summary style="cursor: pointer; padding: 14px 0; font-size: 18px; font-weight: 700; color: #b45309;">
+                        <i class="fas fa-clock"></i> Awaiting Doctor Prescription (<?php echo count($pendingPharmacyPatients); ?>)
                     </summary>
                     <div class="table-responsive">
                         <table class="recent-table">
-                            <thead><tr><th>Patient</th><th>Visit</th><th>Doctor</th><th>Sent At</th><th>Action</th></tr></thead>
+                            <thead><tr><th>Patient</th><th>Visit</th><th>Doctor</th><th>Referred At</th></tr></thead>
                             <tbody>
                                 <?php foreach ($pendingPharmacyPatients as $record): ?>
                                     <tr>
@@ -704,11 +694,6 @@ $pendingPharmacyPatients = $conn->query($pendingPharmacyQuery)->fetch_all(MYSQLI
                                         <td><?php echo htmlspecialchars($record['visit_code']); ?></td>
                                         <td><?php echo htmlspecialchars($record['doctor_name']); ?></td>
                                         <td><?php echo date('M d, Y g:i A', strtotime($record['created_at'])); ?></td>
-                                        <td>
-                                            <a href="pharmacy.php?action=create_prescription&visit_id=<?php echo $record['visit_id']; ?>" class="btn-create" style="padding: 6px 12px; font-size: 13px;">
-                                                <i class="fas fa-pills"></i> Create Prescription
-                                            </a>
-                                        </td>
                                     </tr>
                                 <?php endforeach; ?>
                             </tbody>
@@ -745,9 +730,6 @@ $pendingPharmacyPatients = $conn->query($pendingPharmacyQuery)->fetch_all(MYSQLI
                             <?php endif; ?>
                         </form>
                     </div>
-                    <button class="btn-create" onclick="window.location.href='pharmacy.php?action=create_prescription'">
-                        <i class="fas fa-plus"></i> New Prescription
-                    </button>
                 </div>
 
                 <!-- Status Filter Tabs -->
@@ -815,15 +797,25 @@ $pendingPharmacyPatients = $conn->query($pendingPharmacyQuery)->fetch_all(MYSQLI
                                             <span class="status-badge-pharmacy status-<?php echo strtolower($prescription['status']); ?>">
                                                 <?php echo htmlspecialchars($prescription['status']); ?>
                                             </span>
+                                            <?php if ($prescription['status'] === 'Pending'): ?>
+                                                <?php $isPaid = $prescriptionPaymentStatus[$prescription['prescription_id']] ?? false; ?>
+                                                <br><span class="status-badge-pharmacy status-<?php echo $isPaid ? 'paid' : 'unpaid'; ?>" style="margin-top: 4px;">
+                                                    <?php echo $isPaid ? 'Paid' : 'Unpaid'; ?>
+                                                </span>
+                                            <?php endif; ?>
                                         </td>
                                         <td><?php echo date('M d, Y', strtotime($prescription['prescribed_at'])); ?></td>
                                         <td>
                                             <div class="action-buttons">
                                                 <?php if ($prescription['status'] === 'Pending'): ?>
+                                                    <a href="pharmacy.php?action=view_prescription&id=<?php echo $prescription['prescription_id']; ?>" class="btn-view">
+                                                        <i class="fas fa-eye"></i> View
+                                                    </a>
+                                                    <?php $isPaid = $prescriptionPaymentStatus[$prescription['prescription_id']] ?? false; ?>
                                                     <form method="POST" action="" style="display: inline;">
                                                         <input type="hidden" name="action" value="dispense">
                                                         <input type="hidden" name="prescription_id" value="<?php echo $prescription['prescription_id']; ?>">
-                                                        <button type="submit" class="btn-dispense" onclick="return confirm('Are you sure you want to dispense this prescription?');">
+                                                        <button type="submit" class="btn-dispense" <?php echo $isPaid ? '' : 'disabled title="Payment required before dispensing"'; ?> onclick="<?php echo $isPaid ? "return confirm('Are you sure you want to dispense this prescription?');" : "alert('Payment is required before dispensing.'); return false;"; ?>">
                                                             <i class="fas fa-check"></i> Dispense
                                                         </button>
                                                     </form>
@@ -1012,118 +1004,41 @@ $pendingPharmacyPatients = $conn->query($pendingPharmacyQuery)->fetch_all(MYSQLI
     </div>
     <?php endif; ?>
 
-    <!-- Create Prescription Modal -->
-    <?php if (isset($_GET['action']) && $_GET['action'] === 'create_prescription'): ?>
+    <!-- View Prescription Modal -->
+    <?php if (isset($_GET['action']) && $_GET['action'] === 'view_prescription' && $viewPrescription): ?>
     <div class="form-modal" style="display: flex;">
         <div class="form-modal-content">
             <button class="close-btn" onclick="window.location.href='pharmacy.php'">&times;</button>
-            <h2 style="margin-bottom: 24px;">Create New Prescription</h2>
+            <h2 style="margin-bottom: 24px;">Prescription #<?php echo $viewPrescription['prescription_id']; ?></h2>
             
-            <form method="POST" action="" id="prescriptionForm">
-                <input type="hidden" name="action" value="create_prescription">
-                
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="visit_id">Visit *</label>
-                        <?php if ($selectedVisitId > 0): ?>
-                            <?php foreach ($visits as $visit): if ((int) $visit['visit_id'] === $selectedVisitId): ?>
-                                <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
-                                <input type="text" value="<?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['first_name'] . ' ' . $visit['last_name']); ?>" readonly>
-                            <?php endif; endforeach; ?>
-                        <?php else: ?>
-                        <select id="visit_id" name="visit_id" required>
-                            <option value="">Select Visit</option>
-                            <?php foreach ($visits as $visit): ?>
-                                    <option value="<?php echo $visit['visit_id']; ?>" <?php echo $selectedVisitId === (int) $visit['visit_id'] ? 'selected' : ''; ?>>
-                                    <?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['first_name'] . ' ' . $visit['last_name']); ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                        <?php endif; ?>
-                    </div>
-                    <div class="form-group">
-                        <label for="prescribed_by">Prescribing Doctor *</label>
-                        <?php if ($selectedVisitId > 0): 
-                            $assignedDoctorId = 0;
-                            $assignedDoctorName = 'Select Doctor';
-                            foreach ($visits as $visit) {
-                                if ((int) $visit['visit_id'] === $selectedVisitId && !empty($visit['attending_doctor_id'])) {
-                                    $assignedDoctorId = $visit['attending_doctor_id'];
-                                    $assignedDoctorName = 'Dr. ' . $visit['doc_first'] . ' ' . $visit['doc_last'];
-                                    break;
-                                }
-                            }
-                        ?>
-                            <?php if ($assignedDoctorId > 0): ?>
-                                <input type="hidden" name="prescribed_by" value="<?php echo $assignedDoctorId; ?>">
-                                <input type="text" value="<?php echo htmlspecialchars($assignedDoctorName); ?>" readonly>
-                            <?php else: ?>
-                                <select id="prescribed_by" name="prescribed_by" required>
-                                    <option value="">Select Doctor</option>
-                                    <?php foreach ($doctors as $doctor): ?>
-                                        <option value="<?php echo $doctor['staff_id']; ?>">
-                                            <?php echo htmlspecialchars($doctor['first_name'] . ' ' . $doctor['last_name']); ?>
-                                        </option>
-                                    <?php endforeach; ?>
-                                </select>
-                            <?php endif; ?>
-                        <?php else: ?>
-                            <select id="prescribed_by" name="prescribed_by" required>
-                                <option value="">Select Doctor</option>
-                                <?php foreach ($doctors as $doctor): ?>
-                                    <option value="<?php echo $doctor['staff_id']; ?>">
-                                        <?php echo htmlspecialchars($doctor['first_name'] . ' ' . $doctor['last_name']); ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
-                        <?php endif; ?>
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label>Prescription Items</label>
-                    <div class="prescription-items-container" id="prescriptionItems">
-                        <div class="prescription-item-row">
-                            <div class="form-group">
-                                <label>Medication</label>
-                                <select name="medication_id[]" class="medication-select" required>
-                                    <option value="">Select Medication</option>
-                                    <?php foreach ($medications as $med): ?>
-                                        <option value="<?php echo $med['medication_id']; ?>">
-                                            <?php echo htmlspecialchars($med['name'] . ' (' . $med['strength'] . ') - Stock: ' . $med['stock_quantity']); ?>
-                                        </option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label>Dosage</label>
-                                <input type="text" name="dosage[]" placeholder="e.g., 1 tablet twice daily">
-                            </div>
-                            <div class="form-group">
-                                <label>Duration (days)</label>
-                                <input type="number" name="duration_days[]" placeholder="7">
-                            </div>
-                            <div class="form-group">
-                                <label>Qty</label>
-                                <input type="number" name="quantity[]" value="1" min="1" required>
-                            </div>
-                            <div style="display: flex; align-items: end; padding-bottom: 4px;">
-                                <button type="button" class="remove-item-btn" onclick="removePrescriptionItem(this)">×</button>
-                            </div>
-                        </div>
-                    </div>
-                    <button type="button" class="add-item-btn" onclick="addPrescriptionItem()">
-                        <i class="fas fa-plus"></i> Add Another Medication
-                    </button>
-                </div>
-                
-                <div class="btn-group">
-                    <button type="submit" class="btn-submit">
-                        <i class="fas fa-save"></i> Create Prescription
-                    </button>
-                    <button type="button" class="btn-cancel" onclick="window.location.href='pharmacy.php'">Cancel</button>
-                </div>
-            </form>
+            <div style="background: #f8fafc; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+                <p><strong>Patient:</strong> <?php echo htmlspecialchars($viewPrescription['patient_name']); ?> (<?php echo htmlspecialchars($viewPrescription['patient_code']); ?>)</p>
+                <p><strong>Visit:</strong> <?php echo htmlspecialchars($viewPrescription['visit_code']); ?></p>
+                <p><strong>Prescribed By:</strong> Dr. <?php echo htmlspecialchars($viewPrescription['doctor_name']); ?></p>
+                <p><strong>Date:</strong> <?php echo date('M d, Y g:i A', strtotime($viewPrescription['prescribed_at'])); ?></p>
+                <p><strong>Status:</strong> <?php echo htmlspecialchars($viewPrescription['status']); ?></p>
+            </div>
+            
+            <h3 style="margin-bottom: 12px; font-size: 15px;">Medications Prescribed</h3>
+            <?php if (empty($viewPrescriptionItems)): ?>
+                <p style="color: #64748b;">No medications in this prescription.</p>
+            <?php else: ?>
+                <table class="recent-table" style="margin-bottom: 20px;">
+                    <thead><tr><th>Medication</th><th>Dosage</th><th>Quantity</th><th>Duration</th></tr></thead>
+                    <tbody>
+                        <?php foreach ($viewPrescriptionItems as $item): ?>
+                        <tr>
+                            <td><strong><?php echo htmlspecialchars($item['medication_name']); ?></strong> <?php echo htmlspecialchars($item['strength'] ?? ''); ?></td>
+                            <td><?php echo htmlspecialchars($item['dosage'] ?: '-'); ?></td>
+                            <td><?php echo (int) $item['quantity']; ?> <?php echo htmlspecialchars($item['unit'] ?? ''); ?></td>
+                            <td><?php echo $item['duration_days'] ? (int) $item['duration_days'] . ' days' : '-'; ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+            
+            <button type="button" class="btn-cancel" onclick="window.location.href='pharmacy.php'" style="width: 100%;">Close</button>
         </div>
     </div>
     <?php endif; ?>
@@ -1153,41 +1068,6 @@ $pendingPharmacyPatients = $conn->query($pendingPharmacyQuery)->fetch_all(MYSQLI
                     tab.click();
                 }
             });
-        }
-        
-        // Prescription items management
-        function addPrescriptionItem() {
-            const container = document.getElementById('prescriptionItems');
-            const row = container.querySelector('.prescription-item-row').cloneNode(true);
-            
-            // Clear values
-            row.querySelectorAll('input, select').forEach(input => {
-                if (input.tagName === 'SELECT') {
-                    input.selectedIndex = 0;
-                } else {
-                    input.value = '';
-                }
-            });
-            
-            // Reset quantity to 1
-            const qtyInput = row.querySelector('input[name="quantity[]"]');
-            if (qtyInput) qtyInput.value = 1;
-            
-            // Show remove button
-            const removeBtn = row.querySelector('.remove-item-btn');
-            removeBtn.style.display = 'block';
-            
-            container.appendChild(row);
-        }
-        
-        function removePrescriptionItem(btn) {
-            const row = btn.closest('.prescription-item-row');
-            const container = document.getElementById('prescriptionItems');
-            if (container.querySelectorAll('.prescription-item-row').length > 1) {
-                row.remove();
-            } else {
-                alert('You must have at least one medication in the prescription.');
-            }
         }
     </script>
     <script src="assets/js/dashboard.js"></script>

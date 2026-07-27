@@ -21,7 +21,23 @@ $message = '';
 $error = '';
 $selectedVisitId = isset($_GET['visit_id']) ? intval($_GET['visit_id']) : 0;
 
-// Get visits in arrival order so the nurse can work from the oldest waiting patient.
+if (isset($_GET['error'])) {
+    $error = urldecode($_GET['error']);
+}
+
+// Block direct access to vital signs form for unpaid patients
+if ($selectedVisitId > 0 && isset($_GET['action']) && $_GET['action'] === 'create_vital') {
+    $payCheck = $conn->prepare("SELECT p.payment_confirmed FROM visits v JOIN patients p ON v.patient_id = p.patient_id WHERE v.visit_id = ?");
+    $payCheck->bind_param('i', $selectedVisitId);
+    $payCheck->execute();
+    $payRow = $payCheck->get_result()->fetch_assoc();
+    if (!$payRow || !(int) $payRow['payment_confirmed']) {
+        header('Location: vital_signs.php?error=' . urlencode('Payment must be confirmed before recording vital signs.'));
+        exit();
+    }
+}
+
+// Get visits in arrival order (paid patients only for vital signs recording)
 $visits = $conn->query("SELECT v.visit_id, v.visit_code, 
                         CONCAT(p.first_name, ' ', p.last_name) as patient_name,
                         p.patient_code, v.admitted_at,
@@ -30,6 +46,7 @@ $visits = $conn->query("SELECT v.visit_id, v.visit_code,
                         JOIN patients p ON v.patient_id = p.patient_id 
                         JOIN lookup_visit_statuses vs ON v.visit_status_id = vs.visit_status_id
                         WHERE vs.name NOT IN ('Cancelled', 'Discharged')
+                        AND p.payment_confirmed = 1
                         ORDER BY v.admitted_at ASC LIMIT 200")->fetch_all(MYSQLI_ASSOC);
 
 // Get staff for dropdown (nurses and doctors)
@@ -46,6 +63,16 @@ $doctors = $conn->query("SELECT staff_id, first_name, last_name FROM staff WHERE
 // CREATE VITAL SIGNS
 // ============================================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'create_vital') {
+    $visitId = intval($_POST['visit_id']);
+    $payCheck = $conn->prepare("SELECT p.payment_confirmed FROM visits v JOIN patients p ON v.patient_id = p.patient_id WHERE v.visit_id = ?");
+    $payCheck->bind_param('i', $visitId);
+    $payCheck->execute();
+    $payRow = $payCheck->get_result()->fetch_assoc();
+    if (!$payRow || !(int) $payRow['payment_confirmed']) {
+        header('Location: vital_signs.php?error=' . urlencode('Payment must be confirmed before recording vital signs.'));
+        exit();
+    }
+
     // Sanitize inputs
     $temperature = !empty($_POST['temperature_c']) ? floatval($_POST['temperature_c']) : null;
     $pulse = !empty($_POST['pulse_bpm']) ? intval($_POST['pulse_bpm']) : null;
@@ -242,6 +269,15 @@ if (isset($_GET['action']) && $_GET['action'] === 'edit_vital' && isset($_GET['i
 
 if (isset($_GET['message'])) {
     $message = urldecode($_GET['message']);
+}
+
+$selectedVisitInfo = null;
+if ($selectedVisitId > 0 && !$editVital) {
+    $selectedVisitStmt = $conn->prepare("SELECT v.visit_id, v.visit_code, CONCAT(p.first_name, ' ', p.last_name) as patient_name, p.patient_code
+                                         FROM visits v JOIN patients p ON v.patient_id = p.patient_id WHERE v.visit_id = ?");
+    $selectedVisitStmt->bind_param('i', $selectedVisitId);
+    $selectedVisitStmt->execute();
+    $selectedVisitInfo = $selectedVisitStmt->get_result()->fetch_assoc();
 }
 
 // Get vitals statistics
@@ -726,10 +762,19 @@ $stats = $statsResult->fetch_assoc();
                             <input type="hidden" name="visit_id" value="<?php echo $editVital['visit_id']; ?>">
                             <input type="text" value="<?php echo htmlspecialchars($editVital['visit_code'] . ' - ' . $editVital['patient_name'] . ' (' . $editVital['patient_code'] . ')'); ?>" readonly>
                         <?php else: ?>
-                            <?php foreach ($visits as $visit): if ((int) $visit['visit_id'] === $selectedVisitId): ?>
+                            <?php if ($selectedVisitId > 0 && $selectedVisitInfo): ?>
                                 <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
-                                <input type="text" value="<?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['patient_name'] . ' (' . $visit['patient_code'] . ')'); ?>" readonly>
-                            <?php endif; endforeach; ?>
+                                <input type="text" value="<?php echo htmlspecialchars($selectedVisitInfo['visit_code'] . ' - ' . $selectedVisitInfo['patient_name'] . ' (' . $selectedVisitInfo['patient_code'] . ')'); ?>" readonly>
+                            <?php else: ?>
+                            <select id="visit_id" name="visit_id" required>
+                                <option value="">Select Visit</option>
+                                <?php foreach ($visits as $visit): ?>
+                                    <option value="<?php echo $visit['visit_id']; ?>" <?php echo $selectedVisitId === (int) $visit['visit_id'] ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars($visit['visit_code'] . ' - ' . $visit['patient_name'] . ' (' . $visit['patient_code'] . ')'); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <?php endif; ?>
                         <?php endif; ?>
                     </div>
                     <div class="form-group">

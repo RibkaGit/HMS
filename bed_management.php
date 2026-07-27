@@ -1191,10 +1191,10 @@ if (isset($_GET['message'])) {
                                         <td><?php echo date('M d, Y g:i A', strtotime($assignment['assigned_at'])); ?></td>
                                         <td>
                                             <div class="action-buttons">
-                                                <a href="lab.php?action=create&visit_id=<?php echo $assignment['visit_id']; ?>" class="btn-edit">
+                                                <a href="lab.php?action=sample_collect&visit_id=<?php echo $assignment['visit_id']; ?>" class="btn-edit">
                                                     <i class="fas fa-flask"></i> Lab
                                                 </a>
-                                                <a href="pharmacy.php?action=create_prescription&visit_id=<?php echo $assignment['visit_id']; ?>" class="btn-edit">
+                                                <a href="medical_records.php?action=create_prescription&visit_id=<?php echo $assignment['visit_id']; ?>" class="btn-edit">
                                                     <i class="fas fa-pills"></i> Medicine
                                                 </a>
                                                 <a href="bed_management.php?action=discharge&id=<?php echo $assignment['assignment_id']; ?>" class="btn-discharge" onclick="return confirm('Are you sure you want to discharge this patient from the bed?');">

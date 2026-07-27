@@ -21,7 +21,7 @@ $message = '';
 $error = '';
 
 // Get all patients for dropdown
-$patients = $conn->query("SELECT patient_id, patient_code, first_name, last_name FROM patients WHERE is_active = 1 ORDER BY first_name")->fetch_all(MYSQLI_ASSOC);
+$patients = $conn->query("SELECT patient_id, patient_code, first_name, last_name FROM patients WHERE is_active = 1 ORDER BY patient_id ASC")->fetch_all(MYSQLI_ASSOC);
 
 // Get all doctors for dropdown
 $doctors = $conn->query("SELECT staff_id, first_name, last_name FROM staff WHERE role_id = (SELECT role_id FROM lookup_roles WHERE name = 'Doctor') AND is_active = 1")->fetch_all(MYSQLI_ASSOC);
@@ -520,13 +520,13 @@ if (isset($_GET['message'])) {
                                                 <a href="medical_records.php?action=create_record&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
                                                     <i class="fas fa-file-medical"></i> Record
                                                 </a>
-                                                <a href="lab.php?action=create&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
+                                                <a href="lab.php?action=sample_collect&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
                                                     <i class="fas fa-flask"></i> Lab
                                                 </a>
                                                 <a href="radiology.php?action=create&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
                                                     <i class="fas fa-x-ray"></i> Radiology
                                                 </a>
-                                                <a href="pharmacy.php?action=create_prescription&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
+                                                <a href="medical_records.php?action=create_prescription&visit_id=<?php echo $visit['visit_id']; ?>" class="btn-create-action">
                                                     <i class="fas fa-pills"></i> Medication
                                                 </a>
                                                 <?php if ($visit['visit_type'] === 'IPD'): ?>

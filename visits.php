@@ -124,7 +124,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'delete' && isset($_GET['id'])
 $searchTerm = isset($_GET['search']) ? sanitizeInput($_GET['search']) : '';
 if ($searchTerm) {
     $query = "SELECT v.*, 
-              p.first_name, p.last_name, p.patient_code,
+              p.first_name, p.last_name, p.patient_code, p.payment_confirmed,
               vt.name as visit_type, vs.name as visit_status,
               d.name as department,
               CONCAT(s.first_name, ' ', s.last_name) as doctor_name
@@ -143,7 +143,7 @@ if ($searchTerm) {
     $visits = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 } else {
     $query = "SELECT v.*, 
-              p.first_name, p.last_name, p.patient_code,
+              p.first_name, p.last_name, p.patient_code, p.payment_confirmed,
               vt.name as visit_type, vs.name as visit_status,
               d.name as department,
               CONCAT(s.first_name, ' ', s.last_name) as doctor_name
@@ -492,7 +492,7 @@ if (isset($_GET['message'])) {
                                             <a href="visits.php?action=edit&id=<?php echo $visit['visit_id']; ?>" class="btn-edit">
                                                 <i class="fas fa-edit"></i> Edit
                                             </a>
-                                            <?php if ($visit['visit_status'] === 'Awaiting Billing'): ?>
+                                            <?php if ($visit['visit_status'] === 'Awaiting Billing' || $visit['payment_confirmed'] == 0): ?>
                                                 <a href="#" onclick="return false;" class="btn-create-action" style="opacity: 0.5; cursor: not-allowed;" title="Payment Required">
                                                     <i class="fas fa-heartbeat"></i> Vital
                                                 </a>

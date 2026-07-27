@@ -218,7 +218,8 @@ $query = "SELECT lo.*,
           p.patient_code,
           p.patient_id,
           v.visit_code,
-          v.visit_id
+          v.visit_id,
+          v.mr_id
           FROM lab_orders lo
           JOIN lookup_test_types vt ON lo.test_type_id = vt.test_type_id
           JOIN lookup_order_statuses os ON lo.order_status_id = os.order_status_id
@@ -710,7 +711,12 @@ if (!empty($labOrders)) {
                                             </div>
                                         </div>
                                     </td>
-                                    <td><?php echo htmlspecialchars($group['visit_code']); ?></td>
+                                    <td>
+                                        <div><?php echo htmlspecialchars($group['visit_code']); ?></div>
+                                        <?php if(!empty($group['mr_id'])): ?>
+                                            <small style="color: #64748b; font-size: 11px;"><?php echo htmlspecialchars($group['mr_id']); ?></small>
+                                        <?php endif; ?>
+                                    </td>
                                     <td>
                                         <div style="display: flex; flex-direction: column; gap: 4px;">
                                             <?php foreach ($group['tests'] as $test): ?>
@@ -750,6 +756,11 @@ if (!empty($labOrders)) {
                                     </td>
                                     <td>
                                         <div class="action-buttons">
+                                            <?php if(!empty($group['mr_id'])): ?>
+                                                <button onclick="printSampleLabel('<?php echo htmlspecialchars($group['mr_id']); ?>', '<?php echo htmlspecialchars($group['visit_code']); ?>')" class="btn-print" title="Print Sample Label">
+                                                    <i class="fas fa-print"></i> Print
+                                                </button>
+                                            <?php endif; ?>
                                             <a href="lab.php?action=view_grouped&visit_id=<?php echo $group['visit_id']; ?>" class="btn-result">
                                                 <i class="fas fa-eye"></i> View & Add Results
                                             </a>
@@ -981,5 +992,45 @@ if (!empty($labOrders)) {
     <?php endif; ?>
 
     <script src="assets/js/dashboard.js"></script>
+    <script>
+    function printSampleLabel(mrId, visitCode) {
+        const printWindow = window.open('', '_blank');
+        printWindow.document.write(`
+            <html>
+            <head>
+                <title>Sample Label</title>
+                <style>
+                    body { font-family: Arial, sans-serif; padding: 20px; }
+                    .label { border: 2px solid #000; padding: 20px; width: 300px; margin: 0 auto; }
+                    .label-header { text-align: center; font-weight: bold; font-size: 18px; margin-bottom: 15px; }
+                    .label-row { margin: 10px 0; font-size: 14px; }
+                    .label-label { font-weight: bold; }
+                    .barcode { text-align: center; font-family: monospace; font-size: 16px; margin-top: 15px; letter-spacing: 3px; }
+                </style>
+            </head>
+            <body>
+                <div class="label">
+                    <div class="label-header">HOSPITAL SAMPLE LABEL</div>
+                    <div class="label-row">
+                        <span class="label-label">MR ID:</span> ${mrId}
+                    </div>
+                    <div class="label-row">
+                        <span class="label-label">Visit Code:</span> ${visitCode}
+                    </div>
+                    <div class="label-row">
+                        <span class="label-label">Date:</span> ${new Date().toLocaleDateString()}
+                    </div>
+                    <div class="barcode">${mrId}</div>
+                </div>
+                <script>
+                    window.print();
+                    window.onafterprint = function() { window.close(); };
+                </script>
+            </body>
+            </html>
+        `);
+        printWindow.document.close();
+    }
+    </script>
 </body>
 </html>

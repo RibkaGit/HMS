@@ -193,6 +193,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
             if ($newStatus === 'Paid') {
                 updateVisitStatus($conn, $invoice['visit_id'], 'Registered');
+                $patientUpdate = $conn->prepare("UPDATE patients SET payment_confirmed = 1 WHERE patient_id = ?");
+                $patientUpdate->bind_param('i', $invoice['patient_id']);
+                $patientUpdate->execute();
             }
             
             logUserActivity($conn, $_SESSION['user_id'], 'Processed Payment', "Payment of \${$amount} for invoice ID: {$invoiceId}");

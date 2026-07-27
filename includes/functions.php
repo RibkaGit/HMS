@@ -999,12 +999,62 @@ function isVisitPaid($conn, $visitId) {
     return $invoice && (float) $invoice['paid_amount'] >= (float) $invoice['total'];
 }
 
+function isVisitClinicalReady($conn, $visitId) {
+    $visit = getVisitById($conn, $visitId);
+    if (!$visit) {
+        return false;
+    }
+    if (in_array($visit['visit_status'], ['Cancelled', 'Discharged', 'Awaiting Billing'], true)) {
+        return false;
+    }
+    return isVisitPaid($conn, $visitId);
+}
+
+function generateMrId($conn) {
+    $year = date('y');
+    $query = "SELECT MAX(CAST(SUBSTRING_INDEX(mr_id, '-', -1) AS UNSIGNED)) as max_num
+              FROM visits
+              WHERE mr_id LIKE 'MR-{$year}-%'";
+    $result = $conn->query($query);
+    $row = $result ? $result->fetch_assoc() : null;
+    $maxNum = ($row && $row['max_num']) ? (int) $row['max_num'] : 0;
+    $number = str_pad($maxNum + 1, 5, '0', STR_PAD_LEFT);
+    return "MR-{$year}-{$number}";
+}
+
+function ensureVisitMrId($conn, $visitId) {
+    $stmt = $conn->prepare("SELECT mr_id FROM visits WHERE visit_id = ?");
+    $stmt->bind_param('i', $visitId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    if ($row && !empty($row['mr_id'])) {
+        return $row['mr_id'];
+    }
+    $mrId = generateMrId($conn);
+    $update = $conn->prepare("UPDATE visits SET mr_id = ? WHERE visit_id = ?");
+    $update->bind_param('si', $mrId, $visitId);
+    $update->execute();
+    return $mrId;
+}
+
+function getNextSampleIdPreview($conn) {
+    $year = date('y');
+    $query = "SELECT MAX(CAST(SUBSTRING_INDEX(sample_id, '-', -1) AS UNSIGNED)) as max_num
+              FROM lab_orders
+              WHERE sample_id LIKE 'SMP-{$year}-%'";
+    $result = $conn->query($query);
+    $row = $result ? $result->fetch_assoc() : null;
+    $maxNum = ($row && $row['max_num']) ? (int) $row['max_num'] : 0;
+    $number = str_pad($maxNum + 1, 4, '0', STR_PAD_LEFT);
+    return "SMP-{$year}-{$number}";
+}
+
 // ============================================================================
 // LAB FUNCTIONS
 // ============================================================================
 
 function createLabOrder($conn, $data) {
-    $sampleId = generateSampleId($conn);
+    $sampleId = !empty($data['sample_id']) ? $data['sample_id'] : generateSampleId($conn);
     $query = "INSERT INTO lab_orders (visit_id, test_type_id, ordered_by, 
               order_status_id, sample_id) 
               VALUES (?, ?, ?, ?, ?)";

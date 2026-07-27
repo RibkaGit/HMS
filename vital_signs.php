@@ -220,6 +220,7 @@ $queueQuery = "SELECT v.visit_id, v.visit_code, v.admitted_at,
                LEFT JOIN vital_signs existing ON existing.visit_id = v.visit_id
                WHERE existing.vital_id IS NULL
                AND vs.name NOT IN ('Cancelled', 'Discharged')
+               AND p.payment_confirmed = 1
                ORDER BY v.admitted_at ASC
                LIMIT 200";
 $vitalQueue = $conn->query($queueQuery)->fetch_all(MYSQLI_ASSOC);

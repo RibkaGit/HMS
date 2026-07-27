@@ -118,7 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $recordId = $conn->insert_id;
         logUserActivity($conn, $_SESSION['user_id'], 'Created Medical Record', "Created medical record ID: {$recordId}");
         $message = 'Medical record created successfully!';
-        if ($needsLab || $needsRadiology || $needsBed) {
+        if ($needsLab || $needsRadiology || $needsBed || $needsPharmacy) {
             $parts = [];
             if ($needsLab) {
                 $parts[] = 'sent to lab queue';
@@ -129,12 +129,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             if ($needsBed) {
                 $parts[] = 'sent to bed queue';
             }
+            if ($needsPharmacy) {
+                $parts[] = 'sent to pharmacy queue';
+            }
             $message .= ' Patient ' . implode(' and ', $parts) . '.';
         }
         header('Location: medical_records.php?message=' . urlencode($message));
         exit();
     } else {
         $error = 'Failed to create medical record. Please try again.';
+    }
+}
+
+// ============================================================================
+// CREATE PRESCRIPTION
+// ============================================================================
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'create_prescription') {
+    $visitId = intval($_POST['visit_id']);
+    $patientId = intval($_POST['patient_id']);
+    $doctorId = intval($_POST['doctor_id']);
+    
+    $prescriptionQuery = "INSERT INTO prescriptions (visit_id, prescribed_by, status) VALUES (?, ?, 'Pending')";
+    $presStmt = $conn->prepare($prescriptionQuery);
+    $presStmt->bind_param('ii', $visitId, $doctorId);
+    
+    if ($presStmt->execute()) {
+        $prescriptionId = $conn->insert_id;
+        
+        $addedItems = 0;
+        if (isset($_POST['medications']) && is_array($_POST['medications'])) {
+            foreach ($_POST['medications'] as $medication) {
+                if (!empty($medication['medication_id'])) {
+                    $itemQuery = "INSERT INTO prescription_items (prescription_id, medication_id, dosage, duration_days, quantity) 
+                                 VALUES (?, ?, ?, ?, ?)";
+                    $itemStmt = $conn->prepare($itemQuery);
+                    $itemStmt->bind_param('iisii', 
+                        $prescriptionId,
+                        $medication['medication_id'],
+                        $medication['dosage'],
+                        $medication['duration_days'],
+                        $medication['quantity']
+                    );
+                    if ($itemStmt->execute()) {
+                        $addedItems++;
+                    }
+                }
+            }
+        }
+        
+        if ($addedItems > 0) {
+            logUserActivity($conn, $_SESSION['user_id'], 'Created Prescription', "Created prescription ID: {$prescriptionId} with {$addedItems} items");
+            $message = 'Prescription created successfully and sent to pharmacy!';
+            header('Location: medical_records.php?message=' . urlencode($message));
+            exit();
+        } else {
+            $error = 'Please add at least one medication to the prescription.';
+        }
+    } else {
+        $error = 'Failed to create prescription. Please try again.';
     }
 }
 
@@ -245,7 +297,7 @@ $pendingRecordQuery = "SELECT 0 as record_id, v.visit_id, '' as diagnosis, MIN(v
                        ORDER BY created_at ASC LIMIT 100";
 $pendingRecords = $conn->query($pendingRecordQuery)->fetch_all(MYSQLI_ASSOC);
 
-// Get records with lab results ready
+// Get records with lab results ready (only for identified samples with sample IDs)
 $labReadyQuery = "SELECT mr.record_id, mr.visit_id, mr.diagnosis, mr.lab_results_ready_at,
                    p.patient_id, CONCAT(p.first_name, ' ', p.last_name) as patient_name,
                    p.patient_code, v.visit_code,
@@ -254,7 +306,11 @@ $labReadyQuery = "SELECT mr.record_id, mr.visit_id, mr.diagnosis, mr.lab_results
                    JOIN patients p ON mr.patient_id = p.patient_id
                    JOIN visits v ON mr.visit_id = v.visit_id
                    JOIN staff d ON mr.doctor_id = d.staff_id
+                   JOIN lab_orders lo ON mr.visit_id = lo.visit_id
                    WHERE mr.lab_results_ready = 1
+                   AND lo.sample_id IS NOT NULL
+                   AND lo.sample_id != ''
+                   GROUP BY mr.record_id
                    ORDER BY mr.lab_results_ready_at ASC LIMIT 50";
 $labReadyRecords = $conn->query($labReadyQuery)->fetch_all(MYSQLI_ASSOC);
 
@@ -268,6 +324,10 @@ if (isset($_GET['action']) && $_GET['action'] === 'edit_record' && isset($_GET['
     $stmt->execute();
     $editRecord = $stmt->get_result()->fetch_assoc();
 }
+
+// Get medications for prescription modal
+$medicationsQuery = "SELECT medication_id, name, strength, unit, unit_price FROM medications WHERE is_active = 1 ORDER BY name ASC";
+$medications = $conn->query($medicationsQuery)->fetch_all(MYSQLI_ASSOC);
 
 if (isset($_GET['message'])) {
     $message = urldecode($_GET['message']);
@@ -737,6 +797,9 @@ if (isset($_GET['message'])) {
                                             <a href="lab.php?action=view_grouped&visit_id=<?php echo $record['visit_id']; ?>&from=medical_records" class="btn-create-action" style="background: #22c55e;">
                                                 <i class="fas fa-eye"></i> View Results
                                             </a>
+                                            <a href="medical_records.php?action=create_prescription&visit_id=<?php echo $record['visit_id']; ?>" class="btn-create-action" style="background: #8b5cf6;">
+                                                <i class="fas fa-prescription-bottle"></i> Prescription
+                                            </a>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>
@@ -995,7 +1058,132 @@ if (isset($_GET['message'])) {
         </div>
     </aside>
 
+    <!-- Prescription Modal -->
+    <?php if (isset($_GET['action']) && $_GET['action'] === 'create_prescription' && isset($_GET['visit_id'])): ?>
+    <?php 
+        $presVisitId = intval($_GET['visit_id']);
+        $visitData = getVisitById($conn, $presVisitId);
+    ?>
+    <div class="form-modal" style="display: flex;">
+        <div class="form-modal-content" style="max-width: 800px;">
+            <button class="close-btn" onclick="window.location.href='medical_records.php'">&times;</button>
+            <h2 style="margin-bottom: 24px;">Create Prescription</h2>
+            
+            <div style="background: #f8fafc; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+                <p><strong>Patient:</strong> <?php echo htmlspecialchars($visitData['first_name'] . ' ' . $visitData['last_name']); ?></p>
+                <p><strong>Visit Code:</strong> <?php echo htmlspecialchars($visitData['visit_code']); ?></p>
+            </div>
+            
+            <form method="POST" action="">
+                <input type="hidden" name="action" value="create_prescription">
+                <input type="hidden" name="visit_id" value="<?php echo $presVisitId; ?>">
+                <input type="hidden" name="patient_id" value="<?php echo $visitData['patient_id']; ?>">
+                <input type="hidden" name="doctor_id" value="<?php echo $_SESSION['user_id']; ?>">
+                
+                <div id="medicationItems">
+                    <div class="medication-item" style="background: #f1f5f9; padding: 16px; border-radius: 8px; margin-bottom: 12px;">
+                        <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 12px; align-items: end;">
+                            <div>
+                                <label style="display: block; margin-bottom: 6px; font-weight: 500;">Medication *</label>
+                                <select name="medications[0][medication_id]" required style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                    <option value="">Select medication...</option>
+                                    <?php foreach ($medications as $med): ?>
+                                        <option value="<?php echo $med['medication_id']; ?>" data-price="<?php echo $med['unit_price']; ?>">
+                                            <?php echo htmlspecialchars($med['name'] . ' ' . $med['strength'] . ' ' . $med['unit']); ?> - $<?php echo number_format($med['unit_price'], 2); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="display: block; margin-bottom: 6px; font-weight: 500;">Dosage</label>
+                                <input type="text" name="medications[0][dosage]" placeholder="e.g., 500mg" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                            </div>
+                            <div>
+                                <label style="display: block; margin-bottom: 6px; font-weight: 500;">Duration (days)</label>
+                                <input type="number" name="medications[0][duration_days]" min="1" value="7" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                            </div>
+                            <div>
+                                <label style="display: block; margin-bottom: 6px; font-weight: 500;">Quantity</label>
+                                <input type="number" name="medications[0][quantity]" min="1" value="1" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                            </div>
+                            <div>
+                                <button type="button" onclick="removeMedicationItem(this)" class="btn-cancel" style="padding: 8px 12px;">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <button type="button" onclick="addMedicationItem()" class="btn-cancel" style="margin-bottom: 20px; width: 100%; border-style: dashed;">
+                    <i class="fas fa-plus"></i> Add Another Medication
+                </button>
+                
+                <div class="btn-group">
+                    <button type="submit" class="btn-submit">
+                        <i class="fas fa-prescription-bottle"></i> Create Prescription
+                    </button>
+                    <button type="button" class="btn-cancel" onclick="window.location.href='medical_records.php'">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <?php endif; ?>
+
     <script src="assets/js/dashboard.js"></script>
+    <script>
+    let medicationItemCount = 1;
+    
+    function addMedicationItem() {
+        const container = document.getElementById('medicationItems');
+        const newItem = document.createElement('div');
+        newItem.className = 'medication-item';
+        newItem.style.cssText = 'background: #f1f5f9; padding: 16px; border-radius: 8px; margin-bottom: 12px;';
+        newItem.innerHTML = `
+            <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 12px; align-items: end;">
+                <div>
+                    <label style="display: block; margin-bottom: 6px; font-weight: 500;">Medication *</label>
+                    <select name="medications[${medicationItemCount}][medication_id]" required style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                        <option value="">Select medication...</option>
+                        <?php foreach ($medications as $med): ?>
+                            <option value="<?php echo $med['medication_id']; ?>" data-price="<?php echo $med['unit_price']; ?>">
+                                <?php echo htmlspecialchars($med['name'] . ' ' . $med['strength'] . ' ' . $med['unit']); ?> - $<?php echo number_format($med['unit_price'], 2); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 6px; font-weight: 500;">Dosage</label>
+                    <input type="text" name="medications[${medicationItemCount}][dosage]" placeholder="e.g., 500mg" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 6px; font-weight: 500;">Duration (days)</label>
+                    <input type="number" name="medications[${medicationItemCount}][duration_days]" min="1" value="7" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 6px; font-weight: 500;">Quantity</label>
+                    <input type="number" name="medications[${medicationItemCount}][quantity]" min="1" value="1" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                </div>
+                <div>
+                    <button type="button" onclick="removeMedicationItem(this)" class="btn-cancel" style="padding: 8px 12px;">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+        container.appendChild(newItem);
+        medicationItemCount++;
+    }
+    
+    function removeMedicationItem(button) {
+        const items = document.querySelectorAll('.medication-item');
+        if (items.length > 1) {
+            button.closest('.medication-item').remove();
+        } else {
+            alert('At least one medication is required.');
+        }
+    }
+    </script>
     <script>
         document.querySelectorAll('.flag-toggle').forEach(function(checkbox) {
             checkbox.addEventListener('change', function() {

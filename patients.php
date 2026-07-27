@@ -30,134 +30,150 @@ $error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'create') {
     $primaryDoctorId = null;
     
-    $data = [
-        'patient_code' => generatePatientCode($conn),
-        'uhid_date' => !empty($_POST['uhid_date']) ? $_POST['uhid_date'] : date('Y-m-d'),
-        'new_born' => isset($_POST['new_born']) ? 1 : 0,
-        'title' => sanitizeInput($_POST['title']),
-        'first_name' => sanitizeInput($_POST['first_name']),
-        'middle_name' => sanitizeInput($_POST['middle_name']),
-        'last_name' => sanitizeInput($_POST['last_name']),
-        'date_of_birth' => !empty($_POST['date_of_birth']) ? $_POST['date_of_birth'] : null,
-        'gender_id' => !empty($_POST['gender']) ? getLookupId($conn, 'lookup_genders', 'name', $_POST['gender']) : null,
-        'marital_status' => sanitizeInput($_POST['marital_status']),
-        'occupation' => sanitizeInput($_POST['occupation']),
-        'language' => sanitizeInput($_POST['language']),
-        'religion' => sanitizeInput($_POST['religion']),
-        'nationality' => sanitizeInput($_POST['nationality']),
-        'phone' => sanitizeInput($_POST['phone']),
-        'email' => sanitizeInput($_POST['email']),
-        'loyalty_name' => sanitizeInput($_POST['loyalty_name']),
-        'loyalty_card_no' => sanitizeInput($_POST['loyalty_card_no']),
-        'loyalty_expiry_date' => !empty($_POST['loyalty_expiry_date']) ? $_POST['loyalty_expiry_date'] : null,
-        'national_id' => sanitizeInput($_POST['national_id']),
-        'blood_group' => sanitizeInput($_POST['blood_group']),
-        'identity_type' => sanitizeInput($_POST['identity_type']),
-        'visa_validity' => !empty($_POST['visa_validity']) ? $_POST['visa_validity'] : null,
-        'address' => sanitizeInput($_POST['address_village']),
-        'address_village' => sanitizeInput($_POST['address_village']),
-        'province' => sanitizeInput($_POST['province']),
-        'district_khan' => sanitizeInput($_POST['district_khan']),
-        'commune_sangkat' => sanitizeInput($_POST['commune_sangkat']),
-        'postal_code' => sanitizeInput($_POST['postal_code']),
-        'postal_address_same' => isset($_POST['postal_address_same']) ? 1 : 0,
-        'telephone_2' => sanitizeInput($_POST['telephone_2']),
-        'emergency_contact_name' => sanitizeInput($_POST['relative_name']),
-        'emergency_contact_phone' => sanitizeInput($_POST['relative_phone']),
-        'relative_same_address' => isset($_POST['relative_same_address']) ? 1 : 0,
-        'relative_relationship' => sanitizeInput($_POST['relative_relationship']),
-        'relative_name' => sanitizeInput($_POST['relative_name']),
-        'relative_phone' => sanitizeInput($_POST['relative_phone']),
-        'relative_address_village' => sanitizeInput($_POST['relative_address_village']),
-        'relative_province' => sanitizeInput($_POST['relative_province']),
-        'relative_district_khan' => sanitizeInput($_POST['relative_district_khan']),
-        'relative_commune_sangkat' => sanitizeInput($_POST['relative_commune_sangkat']),
-        'relative_postal_code' => sanitizeInput($_POST['relative_postal_code']),
-        'relative_telephone_2' => sanitizeInput($_POST['relative_telephone_2']),
-        'primary_doctor_id' => $primaryDoctorId
-    ];
+    // Check for duplicate patient (by phone or national_id)
+    $phone = sanitizeInput($_POST['phone']);
+    $nationalId = sanitizeInput($_POST['national_id']);
     
-    $query = "INSERT INTO patients (
-              patient_code, uhid_date, new_born, title, first_name, middle_name, last_name, date_of_birth, 
-              gender_id, marital_status, occupation, language, religion, nationality, phone, email, 
-              loyalty_name, loyalty_card_no, loyalty_expiry_date, national_id, blood_group, identity_type, 
-              visa_validity, address, address_village, province, district_khan, commune_sangkat, postal_code, 
-              postal_address_same, telephone_2, emergency_contact_name, emergency_contact_phone, 
-              relative_same_address, relative_relationship, relative_name, relative_phone, relative_address_village, 
-              relative_province, relative_district_khan, relative_commune_sangkat, relative_postal_code, relative_telephone_2, 
-              primary_doctor_id) 
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-    $stmt = $conn->prepare($query);
-    $stmt->bind_param('ssisssssissssssssssssssssssssisssisssssssssi',
-        $data['patient_code'],
-        $data['uhid_date'],
-        $data['new_born'],
-        $data['title'],
-        $data['first_name'],
-        $data['middle_name'],
-        $data['last_name'],
-        $data['date_of_birth'],
-        $data['gender_id'],
-        $data['marital_status'],
-        $data['occupation'],
-        $data['language'],
-        $data['religion'],
-        $data['nationality'],
-        $data['phone'],
-        $data['email'],
-        $data['loyalty_name'],
-        $data['loyalty_card_no'],
-        $data['loyalty_expiry_date'],
-        $data['national_id'],
-        $data['blood_group'],
-        $data['identity_type'],
-        $data['visa_validity'],
-        $data['address'],
-        $data['address_village'],
-        $data['province'],
-        $data['district_khan'],
-        $data['commune_sangkat'],
-        $data['postal_code'],
-        $data['postal_address_same'],
-        $data['telephone_2'],
-        $data['emergency_contact_name'],
-        $data['emergency_contact_phone'],
-        $data['relative_same_address'],
-        $data['relative_relationship'],
-        $data['relative_name'],
-        $data['relative_phone'],
-        $data['relative_address_village'],
-        $data['relative_province'],
-        $data['relative_district_khan'],
-        $data['relative_commune_sangkat'],
-        $data['relative_postal_code'],
-        $data['relative_telephone_2'],
-        $data['primary_doctor_id']
-    );
+    $duplicateCheck = "SELECT patient_id FROM patients WHERE (phone = ? OR national_id = ?) AND is_active = 1";
+    $dupStmt = $conn->prepare($duplicateCheck);
+    $dupStmt->bind_param('ss', $phone, $nationalId);
+    $dupStmt->execute();
+    $duplicateResult = $dupStmt->get_result();
     
-    if ($stmt->execute()) {
-        $patientId = $conn->insert_id;
-        $visitData = [
-            'visit_code' => generateVisitCode($conn),
-            'patient_id' => $patientId,
-            'visit_type_id' => getLookupId($conn, 'lookup_visit_types', 'name', 'OPD'),
-            'department_id' => getLookupId($conn, 'lookup_departments', 'code', 'OPD'),
-            'attending_doctor_id' => null,
-            'visit_status_id' => getLookupId($conn, 'lookup_visit_statuses', 'name', 'Awaiting Billing'),
-            'notes' => 'Automatically created during patient registration'
-        ];
-        $visitId = createVisit($conn, $visitData);
-        if (!$visitId || !addInvoiceCharge($conn, $visitId, 'OPD registration and consultation', 'Consultation', 1, 50.00)) {
-            $error = 'Patient was created, but the automatic OPD visit or billing record could not be created.';
-        }
-        logUserActivity($conn, $_SESSION['user_id'], 'Created Patient', "Created patient: {$data['first_name']} {$data['last_name']}");
-        if (!$error) {
-            $message = 'Patient registered as OPD and added to billing successfully!';
-            header('Location: patients.php?message=' . urlencode($message));
-            exit();
-        }
+    if ($duplicateResult->num_rows > 0) {
+        $error = 'Patient with this phone number or national ID already exists. Please check for duplicates.';
     } else {
-        $error = 'Failed to create patient. Please try again: ' . $stmt->error;
+        $data = [
+            'patient_code' => generatePatientCode($conn),
+            'uhid_date' => !empty($_POST['uhid_date']) ? $_POST['uhid_date'] : date('Y-m-d'),
+            'new_born' => isset($_POST['new_born']) ? 1 : 0,
+            'title' => sanitizeInput($_POST['title']),
+            'first_name' => sanitizeInput($_POST['first_name']),
+            'middle_name' => sanitizeInput($_POST['middle_name']),
+            'last_name' => sanitizeInput($_POST['last_name']),
+            'date_of_birth' => !empty($_POST['date_of_birth']) ? $_POST['date_of_birth'] : null,
+            'gender_id' => !empty($_POST['gender']) ? getLookupId($conn, 'lookup_genders', 'name', $_POST['gender']) : null,
+            'marital_status' => sanitizeInput($_POST['marital_status']),
+            'occupation' => sanitizeInput($_POST['occupation']),
+            'language' => sanitizeInput($_POST['language']),
+            'religion' => sanitizeInput($_POST['religion']),
+            'nationality' => sanitizeInput($_POST['nationality']),
+            'phone' => $phone,
+            'email' => sanitizeInput($_POST['email']),
+            'loyalty_name' => sanitizeInput($_POST['loyalty_name']),
+            'loyalty_card_no' => sanitizeInput($_POST['loyalty_card_no']),
+            'loyalty_expiry_date' => !empty($_POST['loyalty_expiry_date']) ? $_POST['loyalty_expiry_date'] : null,
+            'national_id' => $nationalId,
+            'blood_group' => sanitizeInput($_POST['blood_group']),
+            'identity_type' => sanitizeInput($_POST['identity_type']),
+            'visa_validity' => !empty($_POST['visa_validity']) ? $_POST['visa_validity'] : null,
+            'address' => sanitizeInput($_POST['address_village']),
+            'address_village' => sanitizeInput($_POST['address_village']),
+            'province' => sanitizeInput($_POST['province']),
+            'district_khan' => sanitizeInput($_POST['district_khan']),
+            'commune_sangkat' => sanitizeInput($_POST['commune_sangkat']),
+            'postal_code' => sanitizeInput($_POST['postal_code']),
+            'postal_address_same' => isset($_POST['postal_address_same']) ? 1 : 0,
+            'telephone_2' => sanitizeInput($_POST['telephone_2']),
+            'emergency_contact_name' => sanitizeInput($_POST['relative_name']),
+            'emergency_contact_phone' => sanitizeInput($_POST['relative_phone']),
+            'relative_same_address' => isset($_POST['relative_same_address']) ? 1 : 0,
+            'relative_relationship' => sanitizeInput($_POST['relative_relationship']),
+            'relative_name' => sanitizeInput($_POST['relative_name']),
+            'relative_phone' => sanitizeInput($_POST['relative_phone']),
+            'relative_address_village' => sanitizeInput($_POST['relative_address_village']),
+            'relative_province' => sanitizeInput($_POST['relative_province']),
+            'relative_district_khan' => sanitizeInput($_POST['relative_district_khan']),
+            'relative_commune_sangkat' => sanitizeInput($_POST['relative_commune_sangkat']),
+            'relative_postal_code' => sanitizeInput($_POST['relative_postal_code']),
+            'relative_telephone_2' => sanitizeInput($_POST['relative_telephone_2']),
+            'primary_doctor_id' => $primaryDoctorId,
+            'payment_confirmed' => 0  // New patients start with payment not confirmed
+        ];
+    
+        $query = "INSERT INTO patients (
+                  patient_code, uhid_date, new_born, title, first_name, middle_name, last_name, date_of_birth, 
+                  gender_id, marital_status, occupation, language, religion, nationality, phone, email, 
+                  loyalty_name, loyalty_card_no, loyalty_expiry_date, national_id, blood_group, identity_type, 
+                  visa_validity, address, address_village, province, district_khan, commune_sangkat, postal_code, 
+                  postal_address_same, telephone_2, emergency_contact_name, emergency_contact_phone, 
+                  relative_same_address, relative_relationship, relative_name, relative_phone, relative_address_village, 
+                  relative_province, relative_district_khan, relative_commune_sangkat, relative_postal_code, relative_telephone_2, 
+                  primary_doctor_id, payment_confirmed) 
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        $stmt = $conn->prepare($query);
+        $stmt->bind_param('ssisssssissssssssssssssssssssisssisssssssssii',
+            $data['patient_code'],
+            $data['uhid_date'],
+            $data['new_born'],
+            $data['title'],
+            $data['first_name'],
+            $data['middle_name'],
+            $data['last_name'],
+            $data['date_of_birth'],
+            $data['gender_id'],
+            $data['marital_status'],
+            $data['occupation'],
+            $data['language'],
+            $data['religion'],
+            $data['nationality'],
+            $data['phone'],
+            $data['email'],
+            $data['loyalty_name'],
+            $data['loyalty_card_no'],
+            $data['loyalty_expiry_date'],
+            $data['national_id'],
+            $data['blood_group'],
+            $data['identity_type'],
+            $data['visa_validity'],
+            $data['address'],
+            $data['address_village'],
+            $data['province'],
+            $data['district_khan'],
+            $data['commune_sangkat'],
+            $data['postal_code'],
+            $data['postal_address_same'],
+            $data['telephone_2'],
+            $data['emergency_contact_name'],
+            $data['emergency_contact_phone'],
+            $data['relative_same_address'],
+            $data['relative_relationship'],
+            $data['relative_name'],
+            $data['relative_phone'],
+            $data['relative_address_village'],
+            $data['relative_province'],
+            $data['relative_district_khan'],
+            $data['relative_commune_sangkat'],
+            $data['relative_postal_code'],
+            $data['relative_telephone_2'],
+            $data['primary_doctor_id'],
+            $data['payment_confirmed']
+        );
+        
+        if ($stmt->execute()) {
+            $patientId = $conn->insert_id;
+            $visitData = [
+                'visit_code' => generateVisitCode($conn),
+                'patient_id' => $patientId,
+                'visit_type_id' => getLookupId($conn, 'lookup_visit_types', 'name', 'OPD'),
+                'department_id' => getLookupId($conn, 'lookup_departments', 'code', 'OPD'),
+                'attending_doctor_id' => null,
+                'visit_status_id' => getLookupId($conn, 'lookup_visit_statuses', 'name', 'Awaiting Billing'),
+                'notes' => 'Automatically created during patient registration'
+            ];
+            $visitId = createVisit($conn, $visitData);
+            if (!$visitId || !addInvoiceCharge($conn, $visitId, 'OPD registration and consultation', 'Consultation', 1, 50.00)) {
+                $error = 'Patient was created, but the automatic OPD visit or billing record could not be created.';
+            }
+            logUserActivity($conn, $_SESSION['user_id'], 'Created Patient', "Created patient: {$data['first_name']} {$data['last_name']}");
+            if (!$error) {
+                $message = 'Patient registered as OPD and added to billing successfully!';
+                header('Location: patients.php?message=' . urlencode($message));
+                exit();
+            }
+        } else {
+            $error = 'Failed to create patient. Please try again: ' . $stmt->error;
+        }
     }
 }
 
@@ -325,7 +341,7 @@ if ($searchTerm) {
               FROM patients p
               LEFT JOIN lookup_genders g ON p.gender_id = g.gender_id
               WHERE p.is_active = 1
-              ORDER BY p.patient_id DESC
+              ORDER BY p.patient_id ASC
               LIMIT 50";
     $patients = $conn->query($query)->fetch_all(MYSQLI_ASSOC);
 }

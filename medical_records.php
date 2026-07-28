@@ -134,6 +134,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             }
             $message .= ' Patient ' . implode(' and ', $parts) . '.';
         }
+
+        // Handle discharge if checkbox is checked
+        if (isset($_POST['discharge_patient']) && $_POST['discharge_patient'] == '1') {
+            $dischargedBy = intval($_SESSION['user_id']);
+            $dischargeQuery = "UPDATE visits SET discharged_at = NOW(), discharged_by = ?, visit_status_id = (SELECT visit_status_id FROM lookup_visit_statuses WHERE name = 'Discharged') WHERE visit_id = ?";
+            $dischargeStmt = $conn->prepare($dischargeQuery);
+            $dischargeStmt->bind_param('ii', $dischargedBy, $visitId);
+            $dischargeStmt->execute();
+            logUserActivity($conn, $_SESSION['user_id'], 'Discharged Patient', "Discharged visit ID: {$visitId} along with medical record creation");
+            $message .= ' Patient discharged successfully!';
+        }
+
         header('Location: medical_records.php?message=' . urlencode($message));
         exit();
     } else {
@@ -166,19 +178,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         if (isset($_POST['medications']) && is_array($_POST['medications'])) {
             foreach ($_POST['medications'] as $medication) {
                 if (!empty($medication['medication_id'])) {
-                    $itemQuery = "INSERT INTO prescription_items (prescription_id, medication_id, dosage, duration_days, quantity) 
-                                 VALUES (?, ?, ?, ?, ?)";
+                    $itemQuery = "INSERT INTO prescription_items (prescription_id, medication_id, dosage, duration_days, quantity, note)
+                                 VALUES (?, ?, ?, ?, ?, ?)";
                     $itemStmt = $conn->prepare($itemQuery);
                     $medicationId = intval($medication['medication_id']);
                     $dosage = sanitizeInput($medication['dosage'] ?? '');
                     $durationDays = !empty($medication['duration_days']) ? intval($medication['duration_days']) : null;
                     $quantity = intval($medication['quantity'] ?? 1);
-                    $itemStmt->bind_param('iisii', 
+                    $note = sanitizeInput($medication['note'] ?? '');
+                    $itemStmt->bind_param('iisiis',
                         $prescriptionId,
                         $medicationId,
                         $dosage,
                         $durationDays,
-                        $quantity
+                        $quantity,
+                        $note
                     );
                     if ($itemStmt->execute()) {
                         $addedItems++;
@@ -218,17 +232,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 // ============================================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_record') {
     $recordId = intval($_POST['record_id']);
-    $query = "UPDATE medical_records SET 
+    $query = "UPDATE medical_records SET
               diagnosis = ?, clinical_notes = ?, doctor_id = ?, updated_at = NOW()
               WHERE record_id = ?";
     $stmt = $conn->prepare($query);
-    $stmt->bind_param('ssii', 
+    $stmt->bind_param('ssii',
         $_POST['diagnosis'],
         $_POST['clinical_notes'],
         $_POST['doctor_id'],
         $recordId
     );
-    
+
     if ($stmt->execute()) {
         logUserActivity($conn, $_SESSION['user_id'], 'Updated Medical Record', "Updated medical record ID: {$recordId}");
         $message = 'Medical record updated successfully!';
@@ -236,6 +250,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         exit();
     } else {
         $error = 'Failed to update medical record. Please try again.';
+    }
+}
+
+// ============================================================================
+// DISCHARGE PATIENT
+// ============================================================================
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'discharge_patient') {
+    $visitId = intval($_POST['visit_id']);
+    $dischargedBy = intval($_SESSION['user_id']);
+
+    $query = "UPDATE visits SET discharged_at = NOW(), discharged_by = ?, visit_status_id = (SELECT visit_status_id FROM lookup_visit_statuses WHERE name = 'Discharged') WHERE visit_id = ?";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param('ii', $dischargedBy, $visitId);
+
+    if ($stmt->execute()) {
+        logUserActivity($conn, $_SESSION['user_id'], 'Discharged Patient', "Discharged visit ID: {$visitId}");
+        $message = 'Patient discharged successfully!';
+        header('Location: medical_records.php?message=' . urlencode($message));
+        exit();
+    } else {
+        $error = 'Failed to discharge patient. Please try again.';
     }
 }
 
@@ -314,11 +349,24 @@ $pendingRecordQuery = "SELECT 0 as record_id, v.visit_id, '' as diagnosis, MIN(v
                        LEFT JOIN staff d ON v.attending_doctor_id = d.staff_id
                        LEFT JOIN medical_records mr ON v.visit_id = mr.visit_id
                        JOIN lookup_visit_statuses lvs ON v.visit_status_id = lvs.visit_status_id
-                       WHERE mr.record_id IS NULL 
+                       WHERE mr.record_id IS NULL
                        AND lvs.name NOT IN ('Cancelled', 'Discharged')
                        GROUP BY v.visit_id
                        ORDER BY created_at ASC LIMIT 100";
 $pendingRecords = $conn->query($pendingRecordQuery)->fetch_all(MYSQLI_ASSOC);
+
+// Get today's discharges
+$todayDischargesQuery = "SELECT v.visit_id, v.visit_code, v.discharged_at, v.discharged_by,
+                          p.patient_id, CONCAT(p.first_name, ' ', p.last_name) as patient_name,
+                          p.patient_code,
+                          CONCAT(d.first_name, ' ', d.last_name) as discharged_by_name
+                          FROM visits v
+                          JOIN patients p ON v.patient_id = p.patient_id
+                          LEFT JOIN staff d ON v.discharged_by = d.staff_id
+                          WHERE DATE(v.discharged_at) = CURDATE()
+                          ORDER BY v.discharged_at DESC";
+$todayDischargesResult = $conn->query($todayDischargesQuery);
+$todayDischarges = $todayDischargesResult ? $todayDischargesResult->fetch_all(MYSQLI_ASSOC) : [];
 
 // Get records with lab results ready (only for identified samples with sample IDs)
 $labReadyQuery = "SELECT mr.record_id, mr.visit_id, mr.diagnosis, mr.lab_results_ready_at,
@@ -894,6 +942,31 @@ if (isset($_GET['message'])) {
             </div>
 
             <div class="table-card">
+                <details>
+                    <summary style="cursor: pointer; padding: 14px 0; font-size: 18px; font-weight: 700; color: #1e293b;">
+                        <i class="fas fa-sign-out-alt"></i> Today's Discharges (<?php echo count($todayDischarges); ?>)
+                    </summary>
+                    <div class="table-responsive">
+                        <table class="recent-table">
+                            <thead><tr><th>Patient</th><th>Visit</th><th>Discharged At</th><th>Discharged By</th></tr></thead>
+                            <tbody>
+                                <?php if (empty($todayDischarges)): ?>
+                                    <tr><td colspan="4" style="text-align: center; color: #94a3b8; padding: 32px;">No discharges today.</td></tr>
+                                <?php else: foreach ($todayDischarges as $discharge): ?>
+                                    <tr>
+                                        <td><strong><?php echo htmlspecialchars($discharge['patient_name']); ?></strong><br><small><?php echo htmlspecialchars($discharge['patient_code']); ?></small></td>
+                                        <td><?php echo htmlspecialchars($discharge['visit_code']); ?></td>
+                                        <td><?php echo date('M d, Y g:i A', strtotime($discharge['discharged_at'])); ?></td>
+                                        <td><?php echo htmlspecialchars($discharge['discharged_by_name'] ?? 'N/A'); ?></td>
+                                    </tr>
+                                <?php endforeach; endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </details>
+            </div>
+
+            <div class="table-card">
                 <details open>
                     <summary style="cursor: pointer; padding: 14px 0; font-size: 18px; font-weight: 700; color: #1e293b;">
                         <i class="fas fa-history"></i> Previous Medical Records (<?php echo count($medicalRecords); ?>)
@@ -1092,6 +1165,10 @@ if (isset($_GET['message'])) {
                         <input type="checkbox" name="needs_pharmacy" value="1">
                         Patient needs pharmacy medicine
                     </label>
+                    <label style="display: block; margin-top: 8px; font-weight: 400;">
+                        <input type="checkbox" name="discharge_patient" value="1">
+                        Discharge patient from visit
+                    </label>
                 </div>
                 <?php endif; ?>
                 
@@ -1169,6 +1246,10 @@ if (isset($_GET['message'])) {
                                 <input type="number" name="medications[0][quantity]" min="1" value="1" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
                             </div>
                             <div>
+                                <label style="display: block; margin-bottom: 6px; font-weight: 500;">Note</label>
+                                <input type="text" name="medications[0][note]" placeholder="Optional note" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                            </div>
+                            <div>
                                 <button type="button" onclick="removeMedicationItem(this)" class="btn-cancel" style="padding: 8px 12px;">
                                     <i class="fas fa-trash"></i>
                                 </button>
@@ -1228,6 +1309,10 @@ if (isset($_GET['message'])) {
                 <div>
                     <label style="display: block; margin-bottom: 6px; font-weight: 500;">Quantity</label>
                     <input type="number" name="medications[${medicationItemCount}][quantity]" min="1" value="1" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 6px; font-weight: 500;">Note</label>
+                    <input type="text" name="medications[${medicationItemCount}][note]" placeholder="Optional note" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
                 </div>
                 <div>
                     <button type="button" onclick="removeMedicationItem(this)" class="btn-cancel" style="padding: 8px 12px;">

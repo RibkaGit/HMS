@@ -640,6 +640,7 @@ CREATE TABLE `prescription_items` (
   `dosage` varchar(80) DEFAULT NULL,
   `duration_days` smallint(5) UNSIGNED DEFAULT NULL,
   `quantity` int(10) UNSIGNED NOT NULL DEFAULT 1,
+  `note` text DEFAULT NULL,
   `dispensed_by` int(10) UNSIGNED DEFAULT NULL,
   `dispensed_at` datetime DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -749,6 +750,7 @@ CREATE TABLE `visits` (
   `visit_status_id` int(10) UNSIGNED NOT NULL,
   `admitted_at` datetime NOT NULL DEFAULT current_timestamp(),
   `discharged_at` datetime DEFAULT NULL,
+  `discharged_by` int(10) UNSIGNED DEFAULT NULL,
   `ward_bed` varchar(30) DEFAULT NULL,
   `notes` text DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

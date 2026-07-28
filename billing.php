@@ -196,6 +196,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $patientUpdate = $conn->prepare("UPDATE patients SET payment_confirmed = 1 WHERE patient_id = ?");
                 $patientUpdate->bind_param('i', $invoice['patient_id']);
                 $patientUpdate->execute();
+
+                // Update prescription status from Unpaid to Paid for this visit
+                $prescriptionUpdate = $conn->prepare("UPDATE prescriptions SET status = 'Paid' WHERE visit_id = ? AND status = 'Unpaid'");
+                $prescriptionUpdate->bind_param('i', $invoice['visit_id']);
+                $prescriptionUpdate->execute();
             }
             
             logUserActivity($conn, $_SESSION['user_id'], 'Processed Payment', "Payment of \${$amount} for invoice ID: {$invoiceId}");

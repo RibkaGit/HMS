@@ -40,12 +40,11 @@ foreach ($testTypes as $test) {
 $orderStatuses = $conn->query("SELECT * FROM lookup_order_statuses")->fetch_all(MYSQLI_ASSOC);
 
 // ============================================================================
-// SAMPLE COLLECT (create lab order with collected status)
+// SAMPLE COLLECT (create lab order with ordered status - waiting for sample collection)
 // ============================================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'sample_collect') {
     $visitId = intval($_POST['visit_id']);
     $testTypeIds = array_map('intval', $_POST['test_type_ids'] ?? []);
-    $sampleIds = $_POST['sample_ids'] ?? [];
     
     ensureVisitMrId($conn, $visitId);
     
@@ -57,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $visit = $visitStmt->get_result()->fetch_assoc();
     $orderedBy = $visit['attending_doctor_id'] ? intval($visit['attending_doctor_id']) : intval($_SESSION['user_id']);
     
-    $orderStatusId = getLookupId($conn, 'lookup_order_statuses', 'name', 'Sample Collected');
+    $orderStatusId = getLookupId($conn, 'lookup_order_statuses', 'name', 'Ordered');
     $createdCount = 0;
     foreach ($testTypeIds as $testTypeId) {
         $data = [
@@ -65,37 +64,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             'test_type_id' => $testTypeId,
             'ordered_by' => $orderedBy,
             'order_status_id' => $orderStatusId,
-            'sample_id' => !empty($sampleIds[$testTypeId]) ? sanitizeInput($sampleIds[$testTypeId]) : null
+            'sample_id' => null
         ];
         if (createLabOrder($conn, $data)) {
             $createdCount++;
         }
     }
     if ($createdCount > 0) {
-        $chargeQuery = $conn->prepare("SELECT name, price FROM lookup_test_types WHERE test_type_id = ?");
-        foreach ($testTypeIds as $testTypeId) {
-            $chargeQuery->bind_param('i', $testTypeId);
-            $chargeQuery->execute();
-            $test = $chargeQuery->get_result()->fetch_assoc();
-            if ($test) {
-                addInvoiceCharge($conn, $visitId, 'Lab: ' . $test['name'], 'Test', 1, (float) $test['price'] > 0 ? (float) $test['price'] : 25.00);
-            }
-        }
-        updateVisitStatus($conn, $visitId, 'Awaiting Results');
-        // Do not automatically uncheck needs_lab flag in medical records
-        // $clearLabFlag = $conn->prepare("UPDATE medical_records SET needs_lab = 0 WHERE visit_id = ?");
-        // $clearLabFlag->bind_param('i', $visitId);
-        // $clearLabFlag->execute();
-        logUserActivity($conn, $_SESSION['user_id'], 'Sample Collected', "Collected {$createdCount} sample(s) for visit ID: {$visitId}");
-        if (isset($_POST['next']) && $_POST['next'] === 'bed') {
-            header('Location: bed_management.php?action=assign_bed&visit_id=' . $visitId);
-            exit();
-        }
-        $message = 'Sample collected successfully!';
+        // Clear needs_lab flag in medical records since tests are now ordered
+        $clearLabFlag = $conn->prepare("UPDATE medical_records SET needs_lab = 0 WHERE visit_id = ?");
+        $clearLabFlag->bind_param('i', $visitId);
+        $clearLabFlag->execute();
+        
+        logUserActivity($conn, $_SESSION['user_id'], 'Lab Tests Ordered', "Ordered {$createdCount} test(s) for visit ID: {$visitId}");
+        $message = 'Lab tests ordered successfully! Waiting for sample collection.';
         header('Location: lab.php?message=' . urlencode($message));
         exit();
     } else {
         $error = 'Select at least one test and try again.';
+    }
+}
+
+// ============================================================================
+// COLLECT SAMPLE (move from Ordered to Sample Collected and add to billing)
+// ============================================================================
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'collect_sample') {
+    $visitId = intval($_POST['visit_id']);
+    $orderIds = array_map('intval', $_POST['order_ids'] ?? []);
+    $sampleIds = $_POST['sample_ids'] ?? [];
+    
+    $orderStatusId = getLookupId($conn, 'lookup_order_statuses', 'name', 'Sample Collected');
+    $updatedCount = 0;
+    
+    foreach ($orderIds as $orderId) {
+        $sampleId = !empty($sampleIds[$orderId]) ? sanitizeInput($sampleIds[$orderId]) : null;
+        
+        // Get test details for billing
+        $testQuery = $conn->prepare("SELECT lo.test_type_id, vt.name, vt.price 
+                                     FROM lab_orders lo
+                                     JOIN lookup_test_types vt ON lo.test_type_id = vt.test_type_id
+                                     WHERE lo.order_id = ?");
+        $testQuery->bind_param('i', $orderId);
+        $testQuery->execute();
+        $testData = $testQuery->get_result()->fetch_assoc();
+        
+        // Update order status
+        $updateQuery = $conn->prepare("UPDATE lab_orders SET order_status_id = ?, sample_id = ? WHERE order_id = ?");
+        $updateQuery->bind_param('isi', $orderStatusId, $sampleId, $orderId);
+        if ($updateQuery->execute()) {
+            $updatedCount++;
+            
+            // Add to billing
+            if ($testData) {
+                addInvoiceCharge($conn, $visitId, 'Lab: ' . $testData['name'], 'Test', 1, (float) $testData['price'] > 0 ? (float) $testData['price'] : 25.00);
+            }
+        }
+    }
+    
+    if ($updatedCount > 0) {
+        updateVisitStatus($conn, $visitId, 'Awaiting Payment');
+        logUserActivity($conn, $_SESSION['user_id'], 'Sample Collected', "Collected {$updatedCount} sample(s) for visit ID: {$visitId}");
+        $message = 'Sample collected successfully! Added to billing.';
+        header('Location: lab.php?message=' . urlencode($message));
+        exit();
+    } else {
+        $error = 'Failed to collect sample. Please try again.';
     }
 }
 
@@ -125,35 +158,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 // ============================================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add_bulk_results') {
     $visitId = intval($_POST['visit_id']);
-    $successCount = 0;
     
-    foreach ($_POST['results'] as $orderId => $resultData) {
-        if (!empty($resultData['value'])) {
-            $data = [
-                'entered_by' => $_SESSION['user_id'],
-                'result_value' => $resultData['value'],
-                'result_notes' => sanitizeInput($resultData['notes'] ?? '')
-            ];
-            if (updateLabResult($conn, intval($orderId), $data)) {
-                $successCount++;
+    // Check if visit is paid - if not, don't allow results
+    if (!isVisitPaid($conn, $visitId)) {
+        $error = 'Payment required before adding lab results. Please complete payment first.';
+    } else {
+        $successCount = 0;
+        
+        foreach ($_POST['results'] as $orderId => $resultData) {
+            if (!empty($resultData['value'])) {
+                $data = [
+                    'entered_by' => $_SESSION['user_id'],
+                    'result_value' => $resultData['value'],
+                    'result_notes' => sanitizeInput($resultData['notes'] ?? '')
+                ];
+                if (updateLabResult($conn, intval($orderId), $data)) {
+                    $successCount++;
+                }
             }
         }
-    }
-    
-    if ($successCount > 0) {
-        updateVisitStatus($conn, $visitId, 'Awaiting Billing');
         
-        // Notify medical records that lab results are ready
-        $notifyStmt = $conn->prepare("UPDATE medical_records SET lab_results_ready = 1, lab_results_ready_at = NOW() WHERE visit_id = ?");
-        $notifyStmt->bind_param('i', $visitId);
-        $notifyStmt->execute();
-        
-        logUserActivity($conn, $_SESSION['user_id'], 'Added Lab Results', "Added {$successCount} lab results for visit ID: {$visitId}");
-        $message = "Successfully added {$successCount} lab result(s)! Medical records notified.";
-        header('Location: lab.php?message=' . urlencode($message));
-        exit();
-    } else {
-        $error = 'No results were added. Please try again.';
+        if ($successCount > 0) {
+            // Notify medical records that lab results are ready
+            $notifyStmt = $conn->prepare("UPDATE medical_records SET lab_results_ready = 1, lab_results_ready_at = NOW() WHERE visit_id = ?");
+            $notifyStmt->bind_param('i', $visitId);
+            $notifyStmt->execute();
+            
+            logUserActivity($conn, $_SESSION['user_id'], 'Added Lab Results', "Added {$successCount} lab results for visit ID: {$visitId}");
+            $message = "Successfully added {$successCount} lab result(s)! Medical records notified.";
+            header('Location: lab.php?message=' . urlencode($message));
+            exit();
+        } else {
+            $error = 'No results were added. Please try again.';
+        }
     }
 }
 
@@ -278,6 +315,25 @@ foreach ($labOrders as $order) {
     }
     $groupedOrders[$key]['tests'][] = $order;
 }
+
+// Get orders waiting for lab test selection (from medical records needs_lab - only new patients without existing lab orders)
+$waitingLabOrders = [];
+$pendingLabQuery = "SELECT mr.record_id, mr.visit_id, mr.diagnosis, mr.created_at,
+                           CONCAT(p.first_name, ' ', p.last_name) as patient_name,
+                           p.patient_code,
+                           p.patient_id,
+                           v.visit_code,
+                           CONCAT(d.first_name, ' ', d.last_name) as doctor_name
+                    FROM medical_records mr
+                    JOIN patients p ON mr.patient_id = p.patient_id
+                    JOIN visits v ON mr.visit_id = v.visit_id
+                    JOIN staff d ON mr.doctor_id = d.staff_id
+                    WHERE mr.needs_lab = 1
+                    AND NOT EXISTS (
+                        SELECT 1 FROM lab_orders lo WHERE lo.visit_id = mr.visit_id
+                    )
+                    ORDER BY mr.created_at ASC";
+$pendingLabPatients = $conn->query($pendingLabQuery)->fetch_all(MYSQLI_ASSOC);
 
 $awaitingSampleGroups = [];
 $sampleCollectedGroups = [];
@@ -654,6 +710,53 @@ if (!empty($labOrders)) {
                 </div>
             </div>
 
+            <!-- Waiting Lab Orders (from medical records) -->
+            <?php if (!empty($pendingLabPatients)): ?>
+            <div class="table-card" style="margin-bottom: 24px; border: 2px solid #3b82f6; background: #eff6ff;">
+                <h3 style="margin: 0 0 16px; font-size: 18px; color: #1d4ed8;">
+                    <i class="fas fa-clipboard-list"></i> Waiting Lab Orders (<?php echo count($pendingLabPatients); ?>)
+                </h3>
+                <div class="table-responsive">
+                    <table class="recent-table">
+                        <thead>
+                            <tr>
+                                <th>Patient</th>
+                                <th>Visit</th>
+                                <th>Doctor</th>
+                                <th>Diagnosis</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($pendingLabPatients as $pending): ?>
+                            <tr>
+                                <td>
+                                    <div class="patient-info">
+                                        <div class="avatar" style="background: <?php echo getUserColor($pending['patient_name']); ?>; width: 32px; height: 32px; font-size: 12px;">
+                                            <?php echo strtoupper(substr($pending['patient_name'], 0, 1)); ?>
+                                        </div>
+                                        <div>
+                                            <span class="patient-name"><?php echo htmlspecialchars($pending['patient_name']); ?></span>
+                                            <small><?php echo htmlspecialchars($pending['patient_code']); ?></small>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><?php echo htmlspecialchars($pending['visit_code']); ?></td>
+                                <td><?php echo htmlspecialchars($pending['doctor_name']); ?></td>
+                                <td><?php echo htmlspecialchars($pending['diagnosis'] ?? 'N/A'); ?></td>
+                                <td>
+                                    <a href="lab.php?action=create&visit_id=<?php echo $pending['visit_id']; ?>" class="btn-result">
+                                        <i class="fas fa-vial"></i> Select Tests
+                                    </a>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <?php endif; ?>
+
             <!-- Status Filter Tabs -->
             <div class="filter-tabs">
                 <a href="lab.php" class="filter-tab <?php echo !$filterStatus ? 'active' : ''; ?>">All</a>
@@ -721,8 +824,8 @@ if (!empty($labOrders)) {
                                     <td><?php echo htmlspecialchars($group['ordered_by_name']); ?></td>
                                     <td>
                                         <div class="action-buttons">
-                                            <a href="lab.php?action=sample_collect&visit_id=<?php echo $group['visit_id']; ?>" class="btn-result">
-                                                <i class="fas fa-vial"></i> Sample Collect
+                                            <a href="lab.php?action=collect_sample&visit_id=<?php echo $group['visit_id']; ?>" class="btn-result">
+                                                <i class="fas fa-vial"></i> Collect Sample
                                             </a>
                                         </div>
                                     </td>
@@ -1030,14 +1133,7 @@ if (!empty($labOrders)) {
                                     <?php foreach ($tests as $test): ?>
                                         <label class="lab-test-label" style="display: flex; align-items: flex-start; gap: 8px; margin: 6px 0; font-size: 13px; cursor: pointer; flex-wrap: wrap;">
                                             <input type="checkbox" class="lab-test-checkbox" name="test_type_ids[]" value="<?php echo $test['test_type_id']; ?>" data-test-id="<?php echo $test['test_type_id']; ?>" style="margin-top: 2px; width: auto;">
-                                            <span><?php echo htmlspecialchars($test['name']); ?> <br><small style="color:#64748b;">Birr <?php echo number_format($test['price'], 2); ?></small></span>
-                                            <span class="sample-id-display" style="display: none; align-items: center; gap: 6px; margin-left: auto;">
-                                                <input type="hidden" class="sample-id-input" name="sample_ids[<?php echo $test['test_type_id']; ?>]" value="">
-                                                <code class="sample-id-text" style="font-size: 11px; background: #e0e7ff; padding: 2px 6px; border-radius: 4px;"></code>
-                                                <button type="button" class="btn-print-sample" style="padding: 2px 8px; font-size: 11px; background: #dbeafe; color: #2563eb; border: none; border-radius: 4px; cursor: pointer;" title="Print Label">
-                                                    <i class="fas fa-print"></i>
-                                                </button>
-                                            </span>
+                                            <span><?php echo htmlspecialchars($test['name']); ?></span>
                                         </label>
                                     <?php endforeach; ?>
                                 </div>
@@ -1050,11 +1146,115 @@ if (!empty($labOrders)) {
                     <button type="submit" class="btn-submit">
                         <i class="fas fa-vial"></i> Save Sample Collect
                     </button>
+                    <button type="button" class="btn-cancel" onclick="window.print()">
+                        <i class="fas fa-print"></i> Print
+                    </button>
                     <button type="button" class="btn-cancel" onclick="window.location.href='lab.php'">Cancel</button>
                 </div>
             </form>
         </div>
     </div>
+    <?php endif; ?>
+
+    <!-- Collect Sample Modal -->
+    <?php if (isset($_GET['action']) && $_GET['action'] === 'collect_sample' && isset($_GET['visit_id'])): ?>
+    <?php
+        $collectVisitId = intval($_GET['visit_id']);
+        $collectVisitData = getVisitById($conn, $collectVisitId);
+        
+        // Get ordered tests for this visit
+        $orderedTestsQuery = "SELECT lo.*, vt.name as test_name
+                             FROM lab_orders lo
+                             JOIN lookup_test_types vt ON lo.test_type_id = vt.test_type_id
+                             WHERE lo.visit_id = ? AND lo.order_status_id = (SELECT order_status_id FROM lookup_order_statuses WHERE name = 'Ordered')";
+        $orderedTestsStmt = $conn->prepare($orderedTestsQuery);
+        $orderedTestsStmt->bind_param('i', $collectVisitId);
+        $orderedTestsStmt->execute();
+        $orderedTests = $orderedTestsStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        
+        // Generate unique sample IDs for each test
+        $sampleIds = [];
+        foreach ($orderedTests as $test) {
+            $sampleIds[$test['order_id']] = generateUniqueSampleId($conn);
+        }
+    ?>
+    <div class="form-modal" style="display: flex;">
+        <div class="form-modal-content">
+            <button class="close-btn" onclick="window.location.href='lab.php'">&times;</button>
+            <h2 style="margin-bottom: 24px;">Collect Sample</h2>
+            
+            <div style="background: #f8fafc; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+                <p><strong>Patient:</strong> <?php echo htmlspecialchars($collectVisitData['first_name'] . ' ' . $collectVisitData['last_name']); ?></p>
+                <p><strong>Visit Code:</strong> <?php echo htmlspecialchars($collectVisitData['visit_code']); ?></p>
+                <p><strong>MR ID:</strong> <?php echo htmlspecialchars($collectVisitData['mr_id'] ?? 'N/A'); ?></p>
+            </div>
+            
+            <form method="POST" action="">
+                <input type="hidden" name="action" value="collect_sample">
+                <input type="hidden" name="visit_id" value="<?php echo $collectVisitId; ?>">
+                
+                <div class="form-group">
+                    <label>Tests to Collect Sample For *</label>
+                    <?php if (empty($orderedTests)): ?>
+                        <p style="color: #64748b;">No ordered tests found for this visit.</p>
+                    <?php else: ?>
+                        <?php foreach ($orderedTests as $test): ?>
+                        <div style="background: #f1f5f9; padding: 12px; border-radius: 8px; margin-bottom: 12px; display: flex; align-items: center; gap: 12px;">
+                            <input type="checkbox" name="order_ids[]" value="<?php echo $test['order_id']; ?>" required style="width: auto;">
+                            <div style="flex: 1;">
+                                <strong><?php echo htmlspecialchars($test['test_name']); ?></strong>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <input type="text" name="sample_ids[<?php echo $test['order_id']; ?>]" 
+                                       placeholder="Sample ID" 
+                                       value="<?php echo $sampleIds[$test['order_id']]; ?>"
+                                       readonly
+                                       style="width: 120px; padding: 6px 10px; border: 1px solid #e2e8f0; border-radius: 6px; background: #f8fafc;">
+                                <button type="button" onclick="printSampleLabel('<?php echo $collectVisitData['mr_id'] ?? 'N/A'; ?>', '<?php echo $sampleIds[$test['order_id']]; ?>')" style="padding: 4px 8px; background: #dbeafe; color: #2563eb; border: none; border-radius: 4px; cursor: pointer;" title="Print Label">
+                                    <i class="fas fa-print"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+                
+                <div class="btn-group">
+                    <button type="submit" class="btn-submit">
+                        <i class="fas fa-vial"></i> Save Sample Collection
+                    </button>
+                    <button type="button" class="btn-cancel" onclick="window.location.href='lab.php'">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <script>
+        function printSampleLabel(mrId, sampleId) {
+            const printWindow = window.open('', '_blank');
+            printWindow.document.write(`
+                <html>
+                <head>
+                    <title>Sample Label</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; padding: 20px; text-align: center; }
+                        .label { border: 2px solid #000; padding: 20px; display: inline-block; }
+                        .mr-id { font-size: 18px; font-weight: bold; margin-bottom: 10px; }
+                        .sample-id { font-size: 24px; font-weight: bold; color: #2563eb; }
+                    </style>
+                </head>
+                <body>
+                    <div class="label">
+                        <div class="mr-id">MR ID: ${mrId}</div>
+                        <div class="sample-id">Sample ID: ${sampleId}</div>
+                    </div>
+                </body>
+                </html>
+            `);
+            printWindow.document.close();
+            printWindow.print();
+        }
+    </script>
     <?php endif; ?>
 
     <!-- Add Result Modal -->

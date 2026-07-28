@@ -856,9 +856,6 @@ if (isset($_GET['message'])) {
                                             <a href="lab.php?action=view_grouped&visit_id=<?php echo $record['visit_id']; ?>&from=medical_records" class="btn-create-action" style="background: #22c55e;">
                                                 <i class="fas fa-eye"></i> View Results
                                             </a>
-                                            <a href="medical_records.php?action=create_prescription&visit_id=<?php echo $record['visit_id']; ?>" class="btn-create-action" style="background: #8b5cf6;">
-                                                <i class="fas fa-prescription-bottle"></i> Prescription
-                                            </a>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>

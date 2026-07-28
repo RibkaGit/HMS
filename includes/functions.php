@@ -1051,6 +1051,25 @@ function getNextSampleIdPreview($conn) {
     return "SMP-{$year}-{$number}";
 }
 
+function generateUniqueSampleId($conn) {
+    static $counter = null;
+    static $year = null;
+    
+    if ($counter === null) {
+        $year = date('y');
+        $query = "SELECT MAX(CAST(SUBSTRING_INDEX(sample_id, '-', -1) AS UNSIGNED)) as max_num
+                  FROM lab_orders
+                  WHERE sample_id LIKE 'SMP-{$year}-%'";
+        $result = $conn->query($query);
+        $row = $result ? $result->fetch_assoc() : null;
+        $counter = ($row && $row['max_num']) ? (int) $row['max_num'] : 0;
+    }
+    
+    $counter++;
+    $number = str_pad($counter, 4, '0', STR_PAD_LEFT);
+    return "SMP-{$year}-{$number}";
+}
+
 // ============================================================================
 // LAB FUNCTIONS
 // ============================================================================

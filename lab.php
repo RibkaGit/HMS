@@ -497,6 +497,28 @@ if (!empty($labOrders)) {
             cursor: pointer;
             font-family: inherit;
         }
+        
+        @media print {
+            .btn-group, .btn-submit, .btn-cancel, .close-btn, .action-buttons, .btn-result, .btn-create-action, .filter-tabs, .search-box, .form-modal-overlay {
+                display: none !important;
+            }
+            .form-modal {
+                position: static !important;
+                background: white !important;
+                box-shadow: none !important;
+                border: none !important;
+            }
+            .form-modal-content {
+                max-width: 100% !important;
+                margin: 0 !important;
+            }
+            body {
+                background: white !important;
+            }
+            .sidebar {
+                display: none !important;
+            }
+        }
         .btn-edit {
             background: #dbeafe;
             color: #2563eb;
@@ -981,6 +1003,7 @@ if (!empty($labOrders)) {
     <?php if (isset($_GET['action']) && $_GET['action'] === 'view_grouped' && isset($_GET['visit_id'])): ?>
     <?php
     $visitId = intval($_GET['visit_id']);
+    $isVisitPaid = isVisitPaid($conn, $visitId);
     $visitTestsQuery = "SELECT lo.*, vt.name as test_name, vt.category, os.name as status_name,
                         lr.result_value, lr.result_notes, lr.entered_at,
                         CONCAT(p.first_name, ' ', p.last_name) as patient_name,
@@ -1009,7 +1032,22 @@ if (!empty($labOrders)) {
             <div style="background: #f8fafc; padding: 16px; border-radius: 8px; margin-bottom: 24px;">
                 <p><strong>Patient:</strong> <?php echo htmlspecialchars($visitInfo['patient_name']); ?> (<?php echo htmlspecialchars($visitInfo['patient_code']); ?>)</p>
                 <p><strong>Visit:</strong> <?php echo htmlspecialchars($visitInfo['visit_code']); ?></p>
+                <p><strong>Payment Status:</strong> <?php echo $isVisitPaid ? '<span style="color: #059669; font-weight: bold;">Paid</span>' : '<span style="color: #dc2626; font-weight: bold;">Unpaid</span>'; ?></p>
             </div>
+            
+            <?php if (!$isVisitPaid): ?>
+            <div style="background: #fee2e2; padding: 16px; border-radius: 8px; margin-bottom: 24px; border: 1px solid #dc2626;">
+                <p style="margin: 0; color: #dc2626; font-weight: bold;">
+                    <i class="fas fa-exclamation-triangle"></i> Payment Required
+                </p>
+                <p style="margin: 8px 0 0 0; color: #7f1d1d;">
+                    Please complete payment before adding lab results. Go to billing to process payment.
+                </p>
+                <a href="billing.php?visit_id=<?php echo $visitId; ?>" style="display: inline-block; margin-top: 12px; padding: 8px 16px; background: #dc2626; color: #fff; text-decoration: none; border-radius: 6px;">
+                    <i class="fas fa-file-invoice-dollar"></i> Go to Billing
+                </a>
+            </div>
+            <?php endif; ?>
             
             <form method="POST" action="">
                 <input type="hidden" name="action" value="add_bulk_results">
@@ -1043,7 +1081,7 @@ if (!empty($labOrders)) {
                                 Entered: <?php echo date('M d, Y g:i A', strtotime($test['entered_at'])); ?>
                             </p>
                         </div>
-                        <?php else: ?>
+                        <?php elseif ($isVisitPaid): ?>
                         <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                             <div style="flex: 1; min-width: 200px;">
                                 <label style="display: block; margin-bottom: 6px; font-weight: 600;">Result Value </label>
@@ -1058,22 +1096,30 @@ if (!empty($labOrders)) {
                                        style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
                             </div>
                         </div>
+                        <?php else: ?>
+                        <div style="background: #f1f5f9; padding: 12px; border-radius: 6px; color: #64748b;">
+                            <i class="fas fa-lock"></i> Result entry locked - payment required
+                        </div>
                         <?php endif; ?>
                     </div>
                     <?php endforeach; ?>
                 </div>
                 
                 <div class="btn-group" style="margin-top: 24px;">
-                    <?php if (isset($_GET['from']) && $_GET['from'] === 'medical_records'): ?>
-                        <button type="submit" class="btn-submit" onclick="this.form.elements['action'].value='acknowledge_results';">
-                            <i class="fas fa-check-circle"></i> Acknowledge Results
-                        </button>
-                        <button type="button" class="btn-cancel" onclick="window.location.href='medical_records.php'">Cancel</button>
+                    <?php if ($isVisitPaid): ?>
+                        <?php if (isset($_GET['from']) && $_GET['from'] === 'medical_records'): ?>
+                            <button type="submit" class="btn-submit" onclick="this.form.elements['action'].value='acknowledge_results';">
+                                <i class="fas fa-check-circle"></i> Acknowledge Results
+                            </button>
+                            <button type="button" class="btn-cancel" onclick="window.location.href='medical_records.php'">Cancel</button>
+                        <?php else: ?>
+                            <button type="submit" class="btn-submit">
+                                <i class="fas fa-save"></i> Save Results
+                            </button>
+                            <button type="button" class="btn-cancel" onclick="window.location.href='lab.php'">Cancel</button>
+                        <?php endif; ?>
                     <?php else: ?>
-                        <button type="submit" class="btn-submit">
-                            <i class="fas fa-save"></i> Save Results
-                        </button>
-                        <button type="button" class="btn-cancel" onclick="window.location.href='lab.php'">Cancel</button>
+                        <button type="button" class="btn-cancel" onclick="window.location.href='lab.php'">Close</button>
                     <?php endif; ?>
                 </div>
             </form>

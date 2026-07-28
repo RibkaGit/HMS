@@ -1192,12 +1192,23 @@ function updateMedicationStock($conn, $medicationId, $quantity) {
 function getMedicationsByPrescription($conn, $prescriptionId) {
     $query = "SELECT pi.*, m.name as medication_name, m.strength, m.unit
               FROM prescription_items pi
-              JOIN medications m ON pi.medication_id = m.medication_id
+              LEFT JOIN medications m ON pi.medication_id = m.medication_id
               WHERE pi.prescription_id = ?";
     $stmt = $conn->prepare($query);
     $stmt->bind_param('i', $prescriptionId);
     $stmt->execute();
-    return $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $result = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    
+    // Ensure prescription_item_id is available (fallback to id if needed)
+    $fixedResult = [];
+    foreach ($result as $item) {
+        if (!isset($item['prescription_item_id']) && isset($item['id'])) {
+            $item['prescription_item_id'] = $item['id'];
+        }
+        $fixedResult[] = $item;
+    }
+    
+    return $fixedResult;
 }
 
 function getPatientHistory($conn, $patientId) {

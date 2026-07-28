@@ -87,36 +87,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $prescriptionId = intval($_POST['prescription_id']);
     $visitId = intval($_POST['visit_id']);
     $medicationItems = $_POST['medication_items'] ?? [];
-    
+
     if (empty($medicationItems)) {
         $error = 'Please select at least one medication to process.';
     } else {
         // Get prescription items details for billing
         $itemIds = implode(',', array_map('intval', $medicationItems));
-        $itemsQuery = "SELECT pi.*, m.name, m.unit_price 
+        $itemsQuery = "SELECT pi.*, m.name, m.unit_price
                       FROM prescription_items pi
                       JOIN medications m ON pi.medication_id = m.medication_id
                       WHERE pi.prescription_item_id IN ($itemIds)";
         $itemsResult = $conn->query($itemsQuery);
-        
+
         $addedCount = 0;
         while ($item = $itemsResult->fetch_assoc()) {
             $chargeAmount = (float) $item['unit_price'] * (int) $item['quantity'];
             addInvoiceCharge($conn, $visitId, 'Pharmacy: ' . $item['name'], 'Medication', (int) $item['quantity'], $chargeAmount);
             $addedCount++;
         }
-        
+
         if ($addedCount > 0) {
-            // Update prescription status to show medications are ready for billing
-            $updatePrescription = $conn->prepare("UPDATE prescriptions SET status = 'Ready for Billing' WHERE prescription_id = ?");
+            // Mark prescription as sent to billing (keep as Pending but add a flag)
+            $updatePrescription = $conn->prepare("UPDATE prescriptions SET status = 'Unpaid' WHERE prescription_id = ?");
             $updatePrescription->bind_param('i', $prescriptionId);
             $updatePrescription->execute();
-            
+
             // Clear pharmacy flag in medical records since medications are processed
             $clearPharmacyFlag = $conn->prepare("UPDATE medical_records SET needs_pharmacy = 0 WHERE visit_id = ?");
             $clearPharmacyFlag->bind_param('i', $visitId);
             $clearPharmacyFlag->execute();
-            
+
             updateVisitStatus($conn, $visitId, 'Awaiting Payment');
             logUserActivity($conn, $_SESSION['user_id'], 'Processed Pharmacy Billing', "Added {$addedCount} medication(s) to billing for visit ID: {$visitId}");
             $message = 'Medications added to billing successfully!';
@@ -232,36 +232,13 @@ if (!empty($params)) {
 $stmt->execute();
 $prescriptions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
-// Compute payment status per prescription visit
-$prescriptionPaymentStatus = [];
+// Compute billing status per prescription (based on whether medications were sent to billing)
+$prescriptionBillingStatus = [];
 foreach ($prescriptions as $prescription) {
-    $prescriptionPaymentStatus[$prescription['prescription_id']] = isVisitPaid($conn, (int) $prescription['visit_id']);
+    // Check if prescription status is 'Unpaid', 'Ready for Billing', or if items have been billed
+    $prescriptionBillingStatus[$prescription['prescription_id']] = ($prescription['status'] === 'Unpaid' || $prescription['status'] === 'Ready for Billing' || $prescription['status'] === 'Dispensed');
 }
 
-// Get prescription for view modal
-$viewPrescription = null;
-$viewPrescriptionItems = [];
-if (isset($_GET['action']) && $_GET['action'] === 'view_prescription' && isset($_GET['id'])) {
-    $viewPresId = intval($_GET['id']);
-    $viewStmt = $conn->prepare("SELECT p.*, 
-          CONCAT(pat.first_name, ' ', pat.last_name) as patient_name,
-          pat.patient_code,
-          CONCAT(s.first_name, ' ', s.last_name) as doctor_name,
-          v.visit_code,
-          mr.record_id as mr_id
-          FROM prescriptions p
-          JOIN visits v ON p.visit_id = v.visit_id
-          JOIN patients pat ON v.patient_id = pat.patient_id
-          LEFT JOIN staff s ON p.prescribed_by = s.staff_id
-          LEFT JOIN medical_records mr ON mr.visit_id = v.visit_id
-          WHERE p.prescription_id = ?");
-    $viewStmt->bind_param('i', $viewPresId);
-    $viewStmt->execute();
-    $viewPrescription = $viewStmt->get_result()->fetch_assoc();
-    if ($viewPrescription) {
-        $viewPrescriptionItems = getMedicationsByPrescription($conn, $viewPresId);
-    }
-}
 
 // Get prescription items
 $prescriptionItems = [];
@@ -270,10 +247,14 @@ if (!empty($prescriptions)) {
     $ids = implode(',', $prescriptionIds);
     $itemQuery = "SELECT pi.*, m.name as medication_name, m.strength, m.unit
                   FROM prescription_items pi
-                  JOIN medications m ON pi.medication_id = m.medication_id
+                  LEFT JOIN medications m ON pi.medication_id = m.medication_id
                   WHERE pi.prescription_id IN ($ids)";
     $itemResult = $conn->query($itemQuery);
     while ($row = $itemResult->fetch_assoc()) {
+        // Ensure we have a valid ID field
+        if (!isset($row['prescription_item_id']) && isset($row['id'])) {
+            $row['prescription_item_id'] = $row['id'];
+        }
         $prescriptionItems[$row['prescription_id']][] = $row;
     }
 }
@@ -867,9 +848,9 @@ $pendingPharmacyPatients = $conn->query($pendingPharmacyQuery)->fetch_all(MYSQLI
                                                 <?php echo htmlspecialchars($prescription['status']); ?>
                                             </span>
                                             <?php if ($prescription['status'] === 'Pending'): ?>
-                                                <?php $isPaid = $prescriptionPaymentStatus[$prescription['prescription_id']] ?? false; ?>
-                                                <br><span class="status-badge-pharmacy status-<?php echo $isPaid ? 'paid' : 'unpaid'; ?>" style="margin-top: 4px;">
-                                                    <?php echo $isPaid ? 'Paid' : 'Unpaid'; ?>
+                                                <?php $isBilled = $prescriptionBillingStatus[$prescription['prescription_id']] ?? false; ?>
+                                                <br><span class="status-badge-pharmacy status-<?php echo $isBilled ? 'paid' : 'unpaid'; ?>" style="margin-top: 4px;">
+                                                    <?php echo $isBilled ? 'Sent to Billing' : 'Not Sent'; ?>
                                                 </span>
                                             <?php endif; ?>
                                         </td>
@@ -880,11 +861,11 @@ $pendingPharmacyPatients = $conn->query($pendingPharmacyQuery)->fetch_all(MYSQLI
                                                     <a href="pharmacy.php?action=view_prescription&id=<?php echo $prescription['prescription_id']; ?>" class="btn-view">
                                                         <i class="fas fa-eye"></i> View
                                                     </a>
-                                                    <?php $isPaid = $prescriptionPaymentStatus[$prescription['prescription_id']] ?? false; ?>
+                                                    <?php $isBilled = $prescriptionBillingStatus[$prescription['prescription_id']] ?? false; ?>
                                                     <form method="POST" action="" style="display: inline;">
                                                         <input type="hidden" name="action" value="dispense">
                                                         <input type="hidden" name="prescription_id" value="<?php echo $prescription['prescription_id']; ?>">
-                                                        <button type="submit" class="btn-dispense" <?php echo $isPaid ? '' : 'disabled title="Payment required before dispensing"'; ?> onclick="<?php echo $isPaid ? "return confirm('Are you sure you want to dispense this prescription?');" : "alert('Payment is required before dispensing.'); return false;"; ?>">
+                                                        <button type="submit" class="btn-dispense" <?php echo $isBilled ? '' : 'disabled title="Medications must be sent to billing before dispensing"'; ?> onclick="<?php echo $isBilled ? "return confirm('Are you sure you want to dispense this prescription?');" : "alert('Medications must be sent to billing before dispensing.'); return false;"; ?>">
                                                             <i class="fas fa-check"></i> Dispense
                                                         </button>
                                                     </form>
@@ -1074,7 +1055,28 @@ $pendingPharmacyPatients = $conn->query($pendingPharmacyQuery)->fetch_all(MYSQLI
     <?php endif; ?>
 
     <!-- View Prescription Modal -->
-    <?php if (isset($_GET['action']) && $_GET['action'] === 'view_prescription' && $viewPrescription): ?>
+    <?php if (isset($_GET['action']) && $_GET['action'] === 'view_prescription' && isset($_GET['id'])): ?>
+    <?php
+        $viewPresId = intval($_GET['id']);
+        $viewStmt = $conn->prepare("SELECT p.*, 
+              CONCAT(pat.first_name, ' ', pat.last_name) as patient_name,
+              pat.patient_code,
+              CONCAT(s.first_name, ' ', s.last_name) as doctor_name,
+              v.visit_code,
+              mr.record_id as mr_id
+              FROM prescriptions p
+              JOIN visits v ON p.visit_id = v.visit_id
+              JOIN patients pat ON v.patient_id = pat.patient_id
+              LEFT JOIN staff s ON p.prescribed_by = s.staff_id
+              LEFT JOIN medical_records mr ON mr.visit_id = v.visit_id
+              WHERE p.prescription_id = ?");
+        $viewStmt->bind_param('i', $viewPresId);
+        $viewStmt->execute();
+        $viewPrescription = $viewStmt->get_result()->fetch_assoc();
+        // Use the already-fetched prescription items array
+        $viewPrescriptionItems = isset($prescriptionItems[$viewPresId]) ? $prescriptionItems[$viewPresId] : [];
+    ?>
+    <?php if ($viewPrescription): ?>
     <div class="form-modal" style="display: flex;">
         <div class="form-modal-content">
             <button class="close-btn" onclick="window.location.href='pharmacy.php'">&times;</button>
@@ -1103,9 +1105,14 @@ $pendingPharmacyPatients = $conn->query($pendingPharmacyQuery)->fetch_all(MYSQLI
                             <?php foreach ($viewPrescriptionItems as $item): ?>
                             <tr>
                                 <td>
-                                    <input type="checkbox" name="medication_items[]" value="<?php echo $item['prescription_item_id']; ?>" class="med-checkbox" onchange="checkMedications()">
+                                    <?php
+                                    $itemId = isset($item['prescription_item_id']) ? $item['prescription_item_id'] :
+                                             (isset($item['id']) ? $item['id'] :
+                                             (isset($item['prescription_items_id']) ? $item['prescription_items_id'] : ''));
+                                    ?>
+                                    <input type="checkbox" name="medication_items[]" value="<?php echo $itemId; ?>" class="med-checkbox" onchange="checkMedications()">
                                 </td>
-                                <td><strong><?php echo htmlspecialchars($item['medication_name']); ?></strong> <?php echo htmlspecialchars($item['strength'] ?? ''); ?></td>
+                                <td><strong><?php echo htmlspecialchars($item['medication_name'] ?? 'Unknown'); ?></strong> <?php echo htmlspecialchars($item['strength'] ?? ''); ?></td>
                                 <td><?php echo htmlspecialchars($item['dosage'] ?: '-'); ?></td>
                                 <td><?php echo (int) $item['quantity']; ?> <?php echo htmlspecialchars($item['unit'] ?? ''); ?></td>
                                 <td><?php echo $item['duration_days'] ? (int) $item['duration_days'] . ' days' : '-'; ?></td>
@@ -1113,7 +1120,7 @@ $pendingPharmacyPatients = $conn->query($pendingPharmacyQuery)->fetch_all(MYSQLI
                             <?php endforeach; ?>
                         </tbody>
                     </table>
-                    
+
                     <div class="btn-group" style="margin-top: 20px;">
                         <button type="submit" class="btn-submit" id="billingBtn" disabled>
                             <i class="fas fa-file-invoice-dollar"></i> Move to Billing
@@ -1124,6 +1131,38 @@ $pendingPharmacyPatients = $conn->query($pendingPharmacyQuery)->fetch_all(MYSQLI
                         <button type="button" class="btn-cancel" onclick="window.location.href='pharmacy.php'">Close</button>
                     </div>
                 </form>
+                <?php elseif ($viewPrescription['status'] === 'Unpaid'): ?>
+                <div style="background: #fef3c7; padding: 16px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #f59e0b;">
+                    <p style="margin: 0; color: #b45309; font-weight: bold;">
+                        <i class="fas fa-clock"></i> Awaiting Payment
+                    </p>
+                    <p style="margin: 8px 0 0 0; color: #78350f;">
+                        Medications have been sent to billing. Please complete payment before dispensing.
+                    </p>
+                    <a href="billing.php?visit_id=<?php echo $viewPrescription['visit_id']; ?>" style="display: inline-block; margin-top: 12px; padding: 8px 16px; background: #f59e0b; color: #fff; text-decoration: none; border-radius: 6px;">
+                        <i class="fas fa-file-invoice-dollar"></i> Go to Billing
+                    </a>
+                </div>
+                <table class="recent-table" style="margin-bottom: 20px;">
+                    <thead><tr><th>Medication</th><th>Dosage</th><th>Quantity</th><th>Duration</th></tr></thead>
+                    <tbody>
+                        <?php foreach ($viewPrescriptionItems as $item): ?>
+                        <tr>
+                            <td><strong><?php echo htmlspecialchars($item['medication_name']); ?></strong> <?php echo htmlspecialchars($item['strength'] ?? ''); ?></td>
+                            <td><?php echo htmlspecialchars($item['dosage'] ?: '-'); ?></td>
+                            <td><?php echo (int) $item['quantity']; ?> <?php echo htmlspecialchars($item['unit'] ?? ''); ?></td>
+                            <td><?php echo $item['duration_days'] ? (int) $item['duration_days'] . ' days' : '-'; ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+
+                <div class="btn-group" style="margin-top: 20px;">
+                    <button type="button" class="btn-cancel" onclick="window.print()">
+                        <i class="fas fa-print"></i> Print
+                    </button>
+                    <button type="button" class="btn-cancel" onclick="window.location.href='pharmacy.php'">Close</button>
+                </div>
                 <?php else: ?>
                 <table class="recent-table" style="margin-bottom: 20px;">
                     <thead><tr><th>Medication</th><th>Dosage</th><th>Quantity</th><th>Duration</th></tr></thead>
@@ -1149,6 +1188,9 @@ $pendingPharmacyPatients = $conn->query($pendingPharmacyQuery)->fetch_all(MYSQLI
             <?php endif; ?>
         </div>
     </div>
+    <?php else: ?>
+    <script>window.location.href='pharmacy.php?error=Prescription not found';</script>
+    <?php endif; ?>
     <?php endif; ?>
 
     <script>

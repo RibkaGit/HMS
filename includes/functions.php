@@ -1190,64 +1190,135 @@ function getPatientHistory($conn, $patientId) {
 
     $visits = getPatientVisits($conn, $patientId);
 
-    $recordsQuery = "SELECT mr.*, CONCAT(d.first_name, ' ', d.last_name) as doctor_name, v.visit_code
-                     FROM medical_records mr
-                     JOIN staff d ON mr.doctor_id = d.staff_id
-                     LEFT JOIN visits v ON mr.visit_id = v.visit_id
-                     WHERE mr.patient_id = ?
-                     ORDER BY mr.created_at DESC";
-    $recordsStmt = $conn->prepare($recordsQuery);
-    $recordsStmt->bind_param('i', $patientId);
-    $recordsStmt->execute();
-    $medicalRecords = $recordsStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $medicalRecords = [];
+    try {
+        $recordsQuery = "SELECT mr.*, CONCAT(d.first_name, ' ', d.last_name) as doctor_name, v.visit_code
+                         FROM medical_records mr
+                         JOIN staff d ON mr.doctor_id = d.staff_id
+                         LEFT JOIN visits v ON mr.visit_id = v.visit_id
+                         WHERE mr.patient_id = ?
+                         ORDER BY mr.created_at DESC";
+        $recordsStmt = $conn->prepare($recordsQuery);
+        if ($recordsStmt) {
+            $recordsStmt->bind_param('i', $patientId);
+            $recordsStmt->execute();
+            $medicalRecords = $recordsStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        }
+    } catch (Exception $e) {
+        $medicalRecords = [];
+    }
 
-    $labQuery = "SELECT lo.*, vt.name as test_name, os.name as status_name, v.visit_code
-                 FROM lab_orders lo
-                 JOIN lookup_test_types vt ON lo.test_type_id = vt.test_type_id
-                 JOIN lookup_order_statuses os ON lo.order_status_id = os.order_status_id
-                 JOIN visits v ON lo.visit_id = v.visit_id
-                 WHERE v.patient_id = ?
-                 AND lo.sample_id IS NOT NULL AND lo.sample_id != ''
-                 ORDER BY lo.ordered_at DESC";
-    $labStmt = $conn->prepare($labQuery);
-    $labStmt->bind_param('i', $patientId);
-    $labStmt->execute();
-    $labOrders = $labStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $labOrders = [];
+    try {
+        $labQuery = "SELECT lo.*, vt.name as test_name, os.name as status_name, v.visit_code
+                     FROM lab_orders lo
+                     JOIN lookup_test_types vt ON lo.test_type_id = vt.test_type_id
+                     JOIN lookup_order_statuses os ON lo.order_status_id = os.order_status_id
+                     JOIN visits v ON lo.visit_id = v.visit_id
+                     WHERE v.patient_id = ?
+                     AND lo.sample_id IS NOT NULL AND lo.sample_id != ''
+                     ORDER BY lo.ordered_at DESC";
+        $labStmt = $conn->prepare($labQuery);
+        if ($labStmt) {
+            $labStmt->bind_param('i', $patientId);
+            $labStmt->execute();
+            $labOrders = $labStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        }
+    } catch (Exception $e) {
+        $labOrders = [];
+    }
 
-    $vitalsQuery = "SELECT vs.*, v.visit_code, CONCAT(s.first_name, ' ', s.last_name) as recorded_by_name
-                    FROM vital_signs vs
-                    JOIN visits v ON vs.visit_id = v.visit_id
-                    LEFT JOIN staff s ON vs.recorded_by = s.staff_id
+    $vitalSigns = [];
+    try {
+        $vitalsQuery = "SELECT vs.*, v.visit_code, CONCAT(s.first_name, ' ', s.last_name) as recorded_by_name
+                        FROM vital_signs vs
+                        JOIN visits v ON vs.visit_id = v.visit_id
+                        LEFT JOIN staff s ON vs.recorded_by = s.staff_id
+                        WHERE v.patient_id = ?
+                        ORDER BY vs.recorded_at DESC
+                        LIMIT 20";
+        $vitalsStmt = $conn->prepare($vitalsQuery);
+        if ($vitalsStmt) {
+            $vitalsStmt->bind_param('i', $patientId);
+            $vitalsStmt->execute();
+            $vitalSigns = $vitalsStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        }
+    } catch (Exception $e) {
+        $vitalSigns = [];
+    }
+
+    $prescriptions = [];
+    try {
+        $rxQuery = "SELECT pr.*, v.visit_code, CONCAT(d.first_name, ' ', d.last_name) as doctor_name
+                    FROM prescriptions pr
+                    JOIN visits v ON pr.visit_id = v.visit_id
+                    JOIN staff d ON pr.prescribed_by = d.staff_id
                     WHERE v.patient_id = ?
-                    ORDER BY vs.recorded_at DESC
-                    LIMIT 20";
-    $vitalsStmt = $conn->prepare($vitalsQuery);
-    $vitalsStmt->bind_param('i', $patientId);
-    $vitalsStmt->execute();
-    $vitalSigns = $vitalsStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+                    ORDER BY pr.prescribed_at DESC";
+        $rxStmt = $conn->prepare($rxQuery);
+        if ($rxStmt) {
+            $rxStmt->bind_param('i', $patientId);
+            $rxStmt->execute();
+            $prescriptions = $rxStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        }
+    } catch (Exception $e) {
+        $prescriptions = [];
+    }
 
-    $rxQuery = "SELECT pr.*, v.visit_code, CONCAT(d.first_name, ' ', d.last_name) as doctor_name
-                FROM prescriptions pr
-                JOIN visits v ON pr.visit_id = v.visit_id
-                JOIN staff d ON pr.prescribed_by = d.staff_id
-                WHERE v.patient_id = ?
-                ORDER BY pr.prescribed_at DESC";
-    $rxStmt = $conn->prepare($rxQuery);
-    $rxStmt->bind_param('i', $patientId);
-    $rxStmt->execute();
-    $prescriptions = $rxStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $bedAssignments = [];
+    try {
+        $bedQuery = "SELECT ba.*, b.bed_number, w.name as ward_name, v.visit_code
+                     FROM bed_assignments ba
+                     JOIN beds b ON ba.bed_id = b.bed_id
+                     JOIN wards w ON b.ward_id = w.ward_id
+                     JOIN visits v ON ba.visit_id = v.visit_id
+                     WHERE ba.patient_id = ?
+                     ORDER BY ba.assigned_at DESC";
+        $bedStmt = $conn->prepare($bedQuery);
+        if ($bedStmt) {
+            $bedStmt->bind_param('i', $patientId);
+            $bedStmt->execute();
+            $bedAssignments = $bedStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        }
+    } catch (Exception $e) {
+        $bedAssignments = [];
+    }
 
-    $bedQuery = "SELECT ba.*, b.bed_number, w.name as ward_name, v.visit_code
-                 FROM bed_assignments ba
-                 JOIN beds b ON ba.bed_id = b.bed_id
-                 JOIN wards w ON b.ward_id = w.ward_id
-                 JOIN visits v ON ba.visit_id = v.visit_id
-                 WHERE ba.patient_id = ?
-                 ORDER BY ba.assigned_at DESC";
-    $bedStmt = $conn->prepare($bedQuery);
-    $bedStmt->bind_param('i', $patientId);
-    $bedStmt->execute();
-    $bedAssignments = $bedStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $radiologyOrders = [];
+    try {
+        $radiologyQuery = "SELECT ro.*, rt.name as test_name, os.name as status_name, v.visit_code
+                          FROM radiology_orders ro
+                          JOIN lookup_radiology_test_types rt ON ro.test_type_id = rt.test_type_id
+                          JOIN lookup_order_statuses os ON ro.order_status_id = os.order_status_id
+                          JOIN visits v ON ro.visit_id = v.visit_id
+                          WHERE v.patient_id = ?
+                          ORDER BY ro.ordered_at DESC";
+        $radiologyStmt = $conn->prepare($radiologyQuery);
+        if ($radiologyStmt) {
+            $radiologyStmt->bind_param('i', $patientId);
+            $radiologyStmt->execute();
+            $radiologyOrders = $radiologyStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        }
+    } catch (Exception $e) {
+        $radiologyOrders = [];
+    }
+
+    $invoices = [];
+    try {
+        $billingQuery = "SELECT i.*, v.visit_code
+                        FROM invoices i
+                        JOIN visits v ON i.visit_id = v.visit_id
+                        WHERE v.patient_id = ?
+                        ORDER BY i.created_at DESC";
+        $billingStmt = $conn->prepare($billingQuery);
+        if ($billingStmt) {
+            $billingStmt->bind_param('i', $patientId);
+            $billingStmt->execute();
+            $invoices = $billingStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        }
+    } catch (Exception $e) {
+        $invoices = [];
+    }
 
     return [
         'patient' => $patient,
@@ -1257,6 +1328,8 @@ function getPatientHistory($conn, $patientId) {
         'vital_signs' => $vitalSigns,
         'prescriptions' => $prescriptions,
         'bed_assignments' => $bedAssignments,
+        'radiology_orders' => $radiologyOrders,
+        'invoices' => $invoices,
     ];
 }
 ?>

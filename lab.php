@@ -82,9 +82,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             }
         }
         updateVisitStatus($conn, $visitId, 'Awaiting Results');
-        $clearLabFlag = $conn->prepare("UPDATE medical_records SET needs_lab = 0 WHERE visit_id = ?");
-        $clearLabFlag->bind_param('i', $visitId);
-        $clearLabFlag->execute();
+        // Do not automatically uncheck needs_lab flag in medical records
+        // $clearLabFlag = $conn->prepare("UPDATE medical_records SET needs_lab = 0 WHERE visit_id = ?");
+        // $clearLabFlag->bind_param('i', $visitId);
+        // $clearLabFlag->execute();
         logUserActivity($conn, $_SESSION['user_id'], 'Sample Collected', "Collected {$createdCount} sample(s) for visit ID: {$visitId}");
         if (isset($_POST['next']) && $_POST['next'] === 'bed') {
             header('Location: bed_management.php?action=assign_bed&visit_id=' . $visitId);
@@ -299,20 +300,6 @@ foreach ($groupedOrders as $key => $group) {
         $sampleCollectedGroups[$key] = $group;
     }
 }
-
-// Patients referred from medical records (needs lab)
-$pendingLabQuery = "SELECT mr.record_id, mr.visit_id, mr.diagnosis, mr.created_at,
-                           CONCAT(p.first_name, ' ', p.last_name) as patient_name,
-                           p.patient_code,
-                           v.visit_code,
-                           CONCAT(d.first_name, ' ', d.last_name) as doctor_name
-                    FROM medical_records mr
-                    JOIN patients p ON mr.patient_id = p.patient_id
-                    JOIN visits v ON mr.visit_id = v.visit_id
-                    JOIN staff d ON mr.doctor_id = d.staff_id
-                    WHERE mr.needs_lab = 1
-                    ORDER BY mr.created_at ASC";
-$pendingLabPatients = $conn->query($pendingLabQuery)->fetch_all(MYSQLI_ASSOC);
 
 if (isset($_GET['message'])) {
     $message = urldecode($_GET['message']);
@@ -667,29 +654,6 @@ if (!empty($labOrders)) {
                 </div>
             </div>
 
-            <?php if (!empty($pendingLabPatients)): ?>
-            <div class="pending-lab-card">
-                <h3><i class="fas fa-user-clock"></i> Patients Referred for Lab (<?php echo count($pendingLabPatients); ?>)</h3>
-                <div class="pending-lab-list">
-                    <?php foreach ($pendingLabPatients as $pending): ?>
-                    <div class="pending-lab-item">
-                        <div class="pending-lab-item-info">
-                            <strong><?php echo htmlspecialchars($pending['patient_name']); ?> (<?php echo htmlspecialchars($pending['patient_code']); ?>)</strong>
-                            <small>
-                                Visit: <?php echo htmlspecialchars($pending['visit_code']); ?>
-                                · Dr. <?php echo htmlspecialchars($pending['doctor_name']); ?>
-                                <?php if ($pending['diagnosis']): ?> · <?php echo htmlspecialchars($pending['diagnosis']); ?><?php endif; ?>
-                            </small>
-                        </div>
-                        <a href="lab.php?action=sample_collect&visit_id=<?php echo $pending['visit_id']; ?>" class="btn-order-lab">
-                            <i class="fas fa-vial"></i> Sample Collect
-                        </a>
-                    </div>
-                    <?php endforeach; ?>
-                </div>
-            </div>
-            <?php endif; ?>
-
             <!-- Status Filter Tabs -->
             <div class="filter-tabs">
                 <a href="lab.php" class="filter-tab <?php echo !$filterStatus ? 'active' : ''; ?>">All</a>
@@ -700,6 +664,7 @@ if (!empty($labOrders)) {
                 <a href="lab.php?status=Cancelled" class="filter-tab <?php echo $filterStatus === 'Cancelled' ? 'active' : ''; ?>">Cancelled</a>
             </div>
 
+            <?php if (!$filterStatus || $filterStatus === 'All' || $filterStatus === 'Ordered'): ?>
             <div class="table-card" style="margin-bottom: 24px;">
                 <h3 style="margin: 0 0 16px; font-size: 18px; color: #2563eb;">
                     <i class="fas fa-vial"></i> Awaiting Sample Collection (<?php echo count($awaitingSampleGroups); ?>)
@@ -768,10 +733,33 @@ if (!empty($labOrders)) {
                     </table>
                 </div>
             </div>
+            <?php endif; ?>
 
-            <div class="table-card">
-                <h3 style="margin: 0 0 16px; font-size: 18px; color: #d97706;">
-                    <i class="fas fa-check-circle"></i> Sample Collected List (<?php echo count($sampleCollectedGroups); ?>)
+            <?php if (!$filterStatus || $filterStatus === 'All' || $filterStatus !== 'Ordered'): ?>
+            <div class="table-card" style="<?php echo ($filterStatus && $filterStatus !== 'All') ? '' : 'margin-top: 24px;'; ?>">
+                <?php
+                $secondCardTitle = "Sample Collected / Processed List";
+                $secondCardIcon = "fa-check-circle";
+                $secondCardColor = "#d97706"; // Amber
+                
+                if ($filterStatus === 'Sample Collected') {
+                    $secondCardTitle = "Sample Collected List";
+                } elseif ($filterStatus === 'Result Ready') {
+                    $secondCardTitle = "Result Ready List";
+                    $secondCardIcon = "fa-flask";
+                    $secondCardColor = "#10b981"; // Green
+                } elseif ($filterStatus === 'Reviewed') {
+                    $secondCardTitle = "Reviewed Orders List";
+                    $secondCardIcon = "fa-clipboard-check";
+                    $secondCardColor = "#2563eb"; // Blue
+                } elseif ($filterStatus === 'Cancelled') {
+                    $secondCardTitle = "Cancelled Orders List";
+                    $secondCardIcon = "fa-times-circle";
+                    $secondCardColor = "#ef4444"; // Red
+                }
+                ?>
+                <h3 style="margin: 0 0 16px; font-size: 18px; color: <?php echo $secondCardColor; ?>;">
+                    <i class="fas <?php echo $secondCardIcon; ?>"></i> <?php echo $secondCardTitle; ?> (<?php echo count($sampleCollectedGroups); ?>)
                 </h3>
                 <div class="table-responsive">
                     <table class="recent-table">
@@ -790,7 +778,17 @@ if (!empty($labOrders)) {
                                 <tr>
                                     <td colspan="6" style="text-align: center; color: #94a3b8; padding: 40px;">
                                         <i class="fas fa-flask" style="font-size: 32px; display: block; margin-bottom: 8px;"></i>
-                                        No collected samples yet
+                                        <?php
+                                        if ($filterStatus === 'Result Ready') {
+                                            echo "No results ready yet";
+                                        } elseif ($filterStatus === 'Reviewed') {
+                                            echo "No reviewed orders yet";
+                                        } elseif ($filterStatus === 'Cancelled') {
+                                            echo "No cancelled orders";
+                                        } else {
+                                            echo "No collected samples yet";
+                                        }
+                                        ?>
                                     </td>
                                 </tr>
                             <?php else: ?>
@@ -872,6 +870,7 @@ if (!empty($labOrders)) {
                     </table>
                 </div>
             </div>
+            <?php endif; ?>
         </main>
     </div>
 
@@ -944,7 +943,7 @@ if (!empty($labOrders)) {
                         <?php else: ?>
                         <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                             <div style="flex: 1; min-width: 200px;">
-                                <label style="display: block; margin-bottom: 6px; font-weight: 500;">Result Value *</label>
+                                <label style="display: block; margin-bottom: 6px; font-weight: 600;">Result Value </label>
                                 <input type="text" name="results[<?php echo $test['order_id']; ?>][value]" 
                                        placeholder="Enter result..." 
                                        style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
@@ -1088,12 +1087,12 @@ if (!empty($labOrders)) {
                 
                 <div class="form-group">
                     <label for="result_value">Result Value *</label>
-                    <textarea id="result_value" name="result_value" rows="3" required placeholder="Enter the test result..."></textarea>
+                    <textarea id="result_value" name="result_value" rows="7" required placeholder="Enter the test result..."></textarea>
                 </div>
                 
                 <div class="form-group">
                     <label for="result_notes">Additional Notes</label>
-                    <textarea id="result_notes" name="result_notes" rows="2" placeholder="Any additional notes about the result..."></textarea>
+                    <textarea id="result_notes" name="result_notes" rows="7" placeholder="Any additional notes about the result..."></textarea>
                 </div>
                 
                 <div class="btn-group">

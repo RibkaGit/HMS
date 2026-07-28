@@ -33,7 +33,7 @@ if ($selectedVisitId > 0) {
 $patients = $conn->query("SELECT patient_id, patient_code, first_name, last_name FROM patients WHERE is_active = 1 ORDER BY patient_id ASC")->fetch_all(MYSQLI_ASSOC);
 
 // Get all visits for dropdown
-$visits = $conn->query("SELECT v.visit_id, v.visit_code, CONCAT(p.first_name, ' ', p.last_name) as patient_name 
+$visits = $conn->query("SELECT v.visit_id, v.visit_code, CONCAT(p.first_name, ' ', p.last_name) as patient_name, p.patient_id
                         FROM visits v 
                         JOIN patients p ON v.patient_id = p.patient_id 
                         ORDER BY v.admitted_at DESC LIMIT 200")->fetch_all(MYSQLI_ASSOC);
@@ -547,7 +547,7 @@ if (isset($_GET['message'])) {
             border: 1px solid #fecaca;
         }
         .record-diagnosis {
-            font-weight: 500;
+            font-weight: 600;
             color: #0f172a;
         }
         .record-notes {
@@ -805,6 +805,37 @@ if (isset($_GET['message'])) {
                 </button>
             </div>
 
+            <!-- Color Legend -->
+            <div style="background: #f8fafc; padding: 16px; border-radius: 8px; margin-bottom: 24px; border: 1px solid #e2e8f0;">
+                <h3 style="margin: 0 0 12px 0; font-size: 14px; font-weight: 600; color: #475569;">Color Legend</h3>
+                <div style="display: flex; gap: 20px; flex-wrap: wrap; font-size: 13px; color: #64748b;">
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span style="width: 12px; height: 12px; background: #22c55e; border-radius: 50%; display: inline-block;"></span>
+                        Lab Results Ready (Green Border)
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span style="width: 12px; height: 12px; background: #22c55e; border-radius: 50%; display: inline-block;"></span>
+                        Patient with Lab Results & Diagnosis (Green Avatar)
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span style="width: 12px; height: 12px; background: #dbeafe; border-radius: 4px; display: inline-block;"></span>
+                        Lab Referral
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span style="width: 12px; height: 12px; background: #f3e8ff; border-radius: 4px; display: inline-block;"></span>
+                        Radiology Referral
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span style="width: 12px; height: 12px; background: #fef3c7; border-radius: 4px; display: inline-block;"></span>
+                        Bed Referral
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span style="width: 12px; height: 12px; background: #ede9fe; border-radius: 4px; display: inline-block;"></span>
+                        Pharmacy Referral
+                    </div>
+                </div>
+            </div>
+
             <?php if (!empty($labReadyRecords)): ?>
             <div class="table-card" style="border: 2px solid #22c55e; background: #f0fdf4;">
                 <details open>
@@ -896,7 +927,13 @@ if (isset($_GET['message'])) {
                                 <tr>
                                     <td>
                                         <div class="patient-info">
-                                            <div class="avatar" style="background: <?php echo getUserColor($record['patient_name']); ?>; width: 32px; height: 32px; font-size: 12px;">
+                                            <?php
+                                            $avatarColor = getUserColor($record['patient_name']);
+                                            if (!empty($record['lab_results_ready']) && !empty($record['diagnosis'])) {
+                                                $avatarColor = '#22c55e';
+                                            }
+                                            ?>
+                                            <div class="avatar" style="background: <?php echo $avatarColor; ?>; width: 32px; height: 32px; font-size: 12px;">
                                                 <?php echo strtoupper(substr($record['patient_name'], 0, 1)); ?>
                                             </div>
                                             <div>
@@ -925,15 +962,15 @@ if (isset($_GET['message'])) {
                                             <label class="referral-toggle <?php echo !empty($record['needs_lab']) ? 'checked-lab' : ''; ?>" title="Mark patient for lab tests">
                                                 <input type="checkbox" class="flag-toggle" data-record-id="<?php echo $record['record_id']; ?>" data-flag="needs_lab" <?php echo !empty($record['needs_lab']) ? 'checked' : ''; ?>>
                                                 <?php if (!empty($record['needs_lab']) && $record['visit_id']): ?>
-                                                    <a href="lab.php?action=sample_collect&visit_id=<?php echo $record['visit_id']; ?>" title="Open lab page"><i class="fas fa-flask"></i> Lab</a>
+                                                    <a href="lab.php?action=sample_collect&visit_id=<?php echo $record['visit_id']; ?>" title="Open lab page" onclick="event.stopPropagation();"><i class="fas fa-flask"></i> Lab</a>
                                                 <?php else: ?>
                                                     <span><i class="fas fa-flask"></i> Lab</span>
                                                 <?php endif; ?>
                                             </label>
                                             <label class="referral-toggle <?php echo !empty($record['needs_radiology']) ? 'checked-radiology' : ''; ?>" title="Mark patient for radiology">
-                                                <input type="checkbox" class="flag-toggle" data-record-id="<?php echo $record['record_id']; ?>" data-flag="needs_radiology" <?php echo !empty($record['needs_radiology']) ? 'checked' : ''; ?>">
+                                                <input type="checkbox" class="flag-toggle" data-record-id="<?php echo $record['record_id']; ?>" data-flag="needs_radiology" <?php echo !empty($record['needs_radiology']) ? 'checked' : ''; ?>>
                                                 <?php if (!empty($record['needs_radiology']) && $record['visit_id']): ?>
-                                                    <a href="radiology.php?action=create&visit_id=<?php echo $record['visit_id']; ?>" title="Open radiology page"><i class="fas fa-x-ray"></i> Radiology</a>
+                                                    <a href="radiology.php?action=create&visit_id=<?php echo $record['visit_id']; ?>" title="Open radiology page" onclick="event.stopPropagation();"><i class="fas fa-x-ray"></i> Radiology</a>
                                                 <?php else: ?>
                                                     <span><i class="fas fa-x-ray"></i> Radiology</span>
                                                 <?php endif; ?>
@@ -941,15 +978,15 @@ if (isset($_GET['message'])) {
                                             <label class="referral-toggle <?php echo !empty($record['needs_bed']) ? 'checked-bed' : ''; ?>" title="Mark patient for bed assignment">
                                                 <input type="checkbox" class="flag-toggle" data-record-id="<?php echo $record['record_id']; ?>" data-flag="needs_bed" <?php echo !empty($record['needs_bed']) ? 'checked' : ''; ?>>
                                                 <?php if (!empty($record['needs_bed']) && $record['visit_id']): ?>
-                                                    <a href="bed_management.php?action=assign_bed&visit_id=<?php echo $record['visit_id']; ?>" title="Open bed assignment"><i class="fas fa-bed"></i> Bed</a>
+                                                    <a href="bed_management.php?action=assign_bed&visit_id=<?php echo $record['visit_id']; ?>" title="Open bed assignment" onclick="event.stopPropagation();"><i class="fas fa-bed"></i> Bed</a>
                                                 <?php else: ?>
                                                     <span><i class="fas fa-bed"></i> Bed</span>
                                                 <?php endif; ?>
                                             </label>
                                             <label class="referral-toggle <?php echo !empty($record['needs_pharmacy']) ? 'checked-pharmacy' : ''; ?>" title="Mark patient for pharmacy medicine">
                                                 <input type="checkbox" class="flag-toggle" data-record-id="<?php echo $record['record_id']; ?>" data-flag="needs_pharmacy" <?php echo !empty($record['needs_pharmacy']) ? 'checked' : ''; ?>>
-                                                <?php if (!empty($record['needs_pharmacy']) && $record['visit_id']): ?>
-                                                    <a href="medical_records.php?action=create_prescription&visit_id=<?php echo $record['visit_id']; ?>" title="Create prescription"><i class="fas fa-pills"></i> Pharmacy</a>
+                                                <?php if ($record['visit_id']): ?>
+                                                    <a href="medical_records.php?action=create_prescription&visit_id=<?php echo $record['visit_id']; ?>" title="Create prescription" onclick="event.stopPropagation();"><i class="fas fa-pills"></i> Pharmacy</a>
                                                 <?php else: ?>
                                                     <span><i class="fas fa-pills"></i> Pharmacy</span>
                                                 <?php endif; ?>
@@ -975,7 +1012,7 @@ if (isset($_GET['message'])) {
 
     <!-- Create/Edit Record Modal -->
     <div class="form-modal" id="recordModal" style="display: <?php echo ($editRecord || isset($_GET['action']) && $_GET['action'] === 'create_record') ? 'flex' : 'none'; ?>;">
-        <div class="form-modal-content">
+        <div class="form-modal-content" style="max-width: 950px;">
             <button class="close-btn" onclick="window.location.href='medical_records.php'">&times;</button>
             <h2 style="margin-bottom: 24px;"><?php echo $editRecord ? 'Edit Medical Record' : 'Create New Medical Record'; ?></h2>
             
@@ -1031,7 +1068,7 @@ if (isset($_GET['message'])) {
                 
                 <div class="form-group">
                     <label for="diagnosis">Diagnosis</label>
-                    <textarea id="diagnosis" name="diagnosis" rows="2" style="width: 100%;" placeholder="e.g., Acute Bronchitis, Hypertension"><?php echo htmlspecialchars($editRecord['diagnosis'] ?? ''); ?></textarea>
+                    <textarea id="diagnosis" name="diagnosis" rows="5" style="width: 100%;" placeholder="e.g., Acute Bronchitis, Hypertension"><?php echo htmlspecialchars($editRecord['diagnosis'] ?? ''); ?></textarea>
                 </div>
                 
                 <div class="form-group">
@@ -1150,6 +1187,9 @@ if (isset($_GET['message'])) {
                 <div class="btn-group">
                     <button type="submit" class="btn-submit">
                         <i class="fas fa-prescription-bottle"></i> Create Prescription
+                    </button>
+                    <button type="button" class="btn-cancel" onclick="window.print()">
+                        <i class="fas fa-print"></i> Print
                     </button>
                     <button type="button" class="btn-cancel" onclick="window.location.href='medical_records.php'">Cancel</button>
                 </div>
@@ -1304,7 +1344,10 @@ if (isset($_GET['message'])) {
             } else {
                 data.visits.forEach(function(v) {
                     html += '<div class="history-item"><div class="history-item-title">' + escapeHtml(v.visit_code) + ' — ' + escapeHtml(v.visit_type) + '</div>';
-                    html += '<div class="history-item-meta">' + formatDate(v.admitted_at) + ' · ' + escapeHtml(v.visit_status) + (v.doctor_name ? ' · Dr. ' + escapeHtml(v.doctor_name) : '') + '</div></div>';
+                    html += '<div class="history-item-meta">' + formatDate(v.admitted_at) + ' · ' + escapeHtml(v.visit_status) + (v.doctor_name ? ' · Dr. ' + escapeHtml(v.doctor_name) : '') + '</div>';
+                    if (v.chief_complaint) {
+                        html += '<div class="history-item-detail"><strong>Chief Complaint:</strong> ' + escapeHtml(v.chief_complaint) + '</div>';
+                    }
                 });
             }
             html += '</div>';
@@ -1315,11 +1358,18 @@ if (isset($_GET['message'])) {
             } else {
                 data.medical_records.forEach(function(r) {
                     html += '<div class="history-item"><div class="history-item-title">' + escapeHtml(r.diagnosis || 'No diagnosis') + '</div>';
-                    html += '<div class="history-item-meta">' + formatDate(r.created_at) + ' · Dr. ' + escapeHtml(r.doctor_name) + '</div>';
+                    html += '<div class="history-item-meta">' + formatDate(r.created_at) + ' · Dr. ' + escapeHtml(r.doctor_name) + ' · ' + escapeHtml(r.visit_code || 'N/A') + '</div>';
                     if (r.clinical_notes) {
-                        html += '<div class="history-item-detail">' + escapeHtml(r.clinical_notes) + '</div>';
+                        html += '<div class="history-item-detail"><strong>Clinical Notes:</strong> ' + escapeHtml(r.clinical_notes) + '</div>';
                     }
-                    html += '</div>';
+                    if (r.needs_lab || r.needs_radiology || r.needs_bed || r.needs_pharmacy) {
+                        const flags = [];
+                        if (r.needs_lab) flags.push('Lab');
+                        if (r.needs_radiology) flags.push('Radiology');
+                        if (r.needs_bed) flags.push('Bed');
+                        if (r.needs_pharmacy) flags.push('Pharmacy');
+                        html += '<div class="history-item-detail"><strong>Referrals:</strong> ' + flags.join(', ') + '</div>';
+                    }
                 });
             }
             html += '</div>';
@@ -1330,7 +1380,21 @@ if (isset($_GET['message'])) {
             } else {
                 data.lab_orders.forEach(function(l) {
                     html += '<div class="history-item"><div class="history-item-title">' + escapeHtml(l.test_name) + '</div>';
-                    html += '<div class="history-item-meta">' + formatDate(l.ordered_at) + ' · ' + escapeHtml(l.status_name) + ' · ' + escapeHtml(l.visit_code) + '</div></div>';
+                    html += '<div class="history-item-meta">' + formatDate(l.ordered_at) + ' · ' + escapeHtml(l.status_name) + ' · ' + escapeHtml(l.visit_code) + '</div>';
+                    if (l.sample_id) {
+                        html += '<div class="history-item-detail"><strong>Sample ID:</strong> ' + escapeHtml(l.sample_id) + '</div>';
+                    }
+                });
+            }
+            html += '</div>';
+
+            html += '<div class="history-section"><h3><i class="fas fa-x-ray"></i> Radiology Orders (' + (data.radiology_orders ? data.radiology_orders.length : 0) + ')</h3>';
+            if (!data.radiology_orders || data.radiology_orders.length === 0) {
+                html += '<p class="history-empty">No radiology orders</p>';
+            } else {
+                data.radiology_orders.forEach(function(ro) {
+                    html += '<div class="history-item"><div class="history-item-title">' + escapeHtml(ro.test_name) + '</div>';
+                    html += '<div class="history-item-meta">' + formatDate(ro.ordered_at) + ' · ' + escapeHtml(ro.status_name) + ' · ' + escapeHtml(ro.visit_code) + '</div>';
                 });
             }
             html += '</div>';
@@ -1343,10 +1407,14 @@ if (isset($_GET['message'])) {
                     const parts = [];
                     if (vs.temperature_c) parts.push('Temp: ' + vs.temperature_c + '°C');
                     if (vs.blood_pressure) parts.push('BP: ' + vs.blood_pressure);
-                    if (vs.pulse_bpm) parts.push('Pulse: ' + vs.pulse_bpm);
+                    if (vs.pulse_bpm) parts.push('Pulse: ' + vs.pulse_bpm + ' bpm');
+                    if (vs.respiratory_rate) parts.push('RR: ' + vs.respiratory_rate + '/min');
+                    if (vs.oxygen_saturation) parts.push('SpO2: ' + vs.oxygen_saturation + '%');
+                    if (vs.weight_kg) parts.push('Weight: ' + vs.weight_kg + ' kg');
+                    if (vs.height_cm) parts.push('Height: ' + vs.height_cm + ' cm');
                     html += '<div class="history-item"><div class="history-item-title">' + escapeHtml(vs.visit_code) + '</div>';
                     html += '<div class="history-item-detail">' + escapeHtml(parts.join(' · ') || 'Recorded') + '</div>';
-                    html += '<div class="history-item-meta">' + formatDate(vs.recorded_at) + '</div></div>';
+                    html += '<div class="history-item-meta">' + formatDate(vs.recorded_at) + (vs.recorded_by_name ? ' · By ' + escapeHtml(vs.recorded_by_name) : '') + '</div></div>';
                 });
             }
             html += '</div>';
@@ -1371,6 +1439,17 @@ if (isset($_GET['message'])) {
                     html += '<div class="history-item-meta">' + formatDate(ba.assigned_at) + ' · ' + escapeHtml(ba.visit_code);
                     if (ba.discharged_at) html += ' · Discharged ' + formatDate(ba.discharged_at);
                     html += '</div></div>';
+                });
+            }
+            html += '</div>';
+
+            html += '<div class="history-section"><h3><i class="fas fa-file-invoice-dollar"></i> Invoices (' + (data.invoices ? data.invoices.length : 0) + ')</h3>';
+            if (!data.invoices || data.invoices.length === 0) {
+                html += '<p class="history-empty">No invoices</p>';
+            } else {
+                data.invoices.forEach(function(inv) {
+                    html += '<div class="history-item"><div class="history-item-title">' + escapeHtml(inv.visit_code) + ' — $' + (inv.total_amount || '0.00') + '</div>';
+                    html += '<div class="history-item-meta">' + formatDate(inv.created_at) + ' · ' + escapeHtml(inv.status || 'Pending') + '</div></div>';
                 });
             }
             html += '</div>';

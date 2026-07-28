@@ -109,8 +109,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $updateVisit = $conn->prepare("UPDATE visits SET attending_doctor_id = ? WHERE visit_id = ?");
             $updateVisit->bind_param('ii', $doctorId, $visitId);
             $updateVisit->execute();
-            updateVisitStatus($conn, $visitId, 'Registered');
         }
+        updateVisitStatus($conn, $visitId, 'In Consultation');
         
         logUserActivity($conn, $_SESSION['user_id'], 'Created Vital Signs', "Created vital signs ID: {$vitalId} for visit ID: {$_POST['visit_id']}");
         $message = 'Vital signs recorded successfully!';

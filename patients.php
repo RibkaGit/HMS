@@ -207,7 +207,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 logUserActivity($conn, $_SESSION['user_id'], 'Created Patient', "Created patient: {$data['first_name']} {$data['last_name']}");
                 if (!$error) {
                     $message = 'Patient registered as OPD and added to billing successfully!';
-                    header('Location: patients.php?message=' . urlencode($message));
+                    header('Location: visits.php?message=' . urlencode($message));
                     exit();
                 }
             } else {

@@ -263,8 +263,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $bedInfo->execute();
             $bedData = $bedInfo->get_result()->fetch_assoc();
 
-            $ipdRecordQuery = "INSERT INTO ipd_records (visit_id, patient_id, attending_doctor_id, bed_id, ward_id, admission_notes, status)
-                             VALUES (?, ?, ?, ?, ?, ?, 'Admitted')";
+            $ipdRecordQuery = "INSERT INTO ipd_records (visit_id, patient_id, attending_doctor_id, bed_id, ward_id, admission_notes, status, admission_date)
+                             VALUES (?, ?, ?, ?, ?, ?, 'Admitted', NOW())";
             $ipdRecordStmt = $conn->prepare($ipdRecordQuery);
             if ($ipdRecordStmt) {
                 $ipdRecordStmt->bind_param('iiiiss',
@@ -275,7 +275,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     $bedData['ward_id'],
                     $notes
                 );
-                $ipdRecordStmt->execute();
+                if (!$ipdRecordStmt->execute()) {
+                    throw new Exception('Failed to create IPD record: ' . $ipdRecordStmt->error);
+                }
+            } else {
+                throw new Exception('Failed to prepare IPD record query. Table may not exist. Please run hms_database.sql in phpMyAdmin.');
             }
 
             $conn->commit();

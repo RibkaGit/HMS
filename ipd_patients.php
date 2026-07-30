@@ -1056,6 +1056,19 @@ if (isset($_GET['message'])) {
     </div>
 
     <script>
+        // Tab switching functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const tabs = document.querySelectorAll('.tab');
+            tabs.forEach(tab => {
+                tab.addEventListener('click', function() {
+                    const tabName = this.getAttribute('data-tab');
+                    const url = new URL(window.location);
+                    url.searchParams.set('tab', tabName);
+                    window.location.href = url.toString();
+                });
+            });
+        });
+
         let medicationCount = 0;
         let checkupMedicationCount = 0;
 

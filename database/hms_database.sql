@@ -1492,6 +1492,149 @@ ALTER TABLE `vital_signs`
 --
 ALTER TABLE `wards`
   ADD CONSTRAINT `fk_wards_department` FOREIGN KEY (`department_id`) REFERENCES `lookup_departments` (`department_id`);
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `ipd_checkups`
+--
+
+CREATE TABLE `ipd_checkups` (
+  `checkup_id` int(10) UNSIGNED NOT NULL,
+  `visit_id` int(10) UNSIGNED NOT NULL,
+  `patient_id` int(10) UNSIGNED NOT NULL,
+  `recorded_by` int(10) UNSIGNED NOT NULL,
+  `checkup_time` datetime NOT NULL DEFAULT current_timestamp(),
+  `progress_notes` text DEFAULT NULL,
+  `glucose_level` decimal(5,2) DEFAULT NULL,
+  `glucose_unit` varchar(10) DEFAULT 'mg/dL',
+  `glucose_type` varchar(20) DEFAULT 'Random',
+  `injection_given` tinyint(1) DEFAULT 0,
+  `injection_type` varchar(100) DEFAULT NULL,
+  `injection_dosage` varchar(50) DEFAULT NULL,
+  `medicine_given` tinyint(1) DEFAULT 0,
+  `medicine_notes` text DEFAULT NULL,
+  `vital_signs` text DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Indexes for table `ipd_checkups`
+--
+ALTER TABLE `ipd_checkups`
+  ADD PRIMARY KEY (`checkup_id`),
+  ADD KEY `idx_ipd_checkups_visit` (`visit_id`),
+  ADD KEY `idx_ipd_checkups_patient` (`patient_id`),
+  ADD KEY `idx_ipd_checkups_recorded` (`recorded_by`),
+  ADD KEY `idx_ipd_checkups_time` (`checkup_time`);
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `ipd_medicine_administration`
+--
+
+CREATE TABLE `ipd_medicine_administration` (
+  `administration_id` int(10) UNSIGNED NOT NULL,
+  `checkup_id` int(10) UNSIGNED NOT NULL,
+  `visit_id` int(10) UNSIGNED NOT NULL,
+  `medication_id` int(10) UNSIGNED NOT NULL,
+  `dosage` varchar(80) DEFAULT NULL,
+  `quantity` int(10) UNSIGNED NOT NULL DEFAULT 1,
+  `administered_by` int(10) UNSIGNED NOT NULL,
+  `administered_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `notes` text DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Indexes for table `ipd_medicine_administration`
+--
+ALTER TABLE `ipd_medicine_administration`
+  ADD PRIMARY KEY (`administration_id`),
+  ADD KEY `idx_ipd_med_checkup` (`checkup_id`),
+  ADD KEY `idx_ipd_med_visit` (`visit_id`),
+  ADD KEY `idx_ipd_med_medication` (`medication_id`),
+  ADD KEY `idx_ipd_med_administered` (`administered_by`);
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `ipd_records`
+--
+
+CREATE TABLE `ipd_records` (
+  `ipd_record_id` int(10) UNSIGNED NOT NULL,
+  `visit_id` int(10) UNSIGNED NOT NULL,
+  `patient_id` int(10) UNSIGNED NOT NULL,
+  `admission_date` datetime NOT NULL DEFAULT current_timestamp(),
+  `discharge_date` datetime DEFAULT NULL,
+  `attending_doctor_id` int(10) UNSIGNED DEFAULT NULL,
+  `bed_id` int(10) UNSIGNED DEFAULT NULL,
+  `ward_id` int(10) UNSIGNED DEFAULT NULL,
+  `primary_diagnosis` text DEFAULT NULL,
+  `admission_notes` text DEFAULT NULL,
+  `discharge_notes` text DEFAULT NULL,
+  `discharged_by` int(10) UNSIGNED DEFAULT NULL,
+  `status` varchar(30) DEFAULT 'Admitted'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Indexes for table `ipd_records`
+--
+ALTER TABLE `ipd_records`
+  ADD PRIMARY KEY (`ipd_record_id`),
+  ADD KEY `idx_ipd_records_visit` (`visit_id`),
+  ADD KEY `idx_ipd_records_patient` (`patient_id`),
+  ADD KEY `idx_ipd_records_bed` (`bed_id`),
+  ADD KEY `idx_ipd_records_ward` (`ward_id`),
+  ADD KEY `idx_ipd_records_doctor` (`attending_doctor_id`),
+  ADD KEY `idx_ipd_records_status` (`status`);
+
+--
+-- AUTO_INCREMENT for table `ipd_checkups`
+--
+ALTER TABLE `ipd_checkups`
+  MODIFY `checkup_id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `ipd_medicine_administration`
+--
+ALTER TABLE `ipd_medicine_administration`
+  MODIFY `administration_id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `ipd_records`
+--
+ALTER TABLE `ipd_records`
+  MODIFY `ipd_record_id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
+
+--
+-- Constraints for table `ipd_checkups`
+--
+ALTER TABLE `ipd_checkups`
+  ADD CONSTRAINT `fk_ipd_checkups_visit` FOREIGN KEY (`visit_id`) REFERENCES `visits` (`visit_id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `fk_ipd_checkups_patient` FOREIGN KEY (`patient_id`) REFERENCES `patients` (`patient_id`),
+  ADD CONSTRAINT `fk_ipd_checkups_recorded` FOREIGN KEY (`recorded_by`) REFERENCES `staff` (`staff_id`);
+
+--
+-- Constraints for table `ipd_medicine_administration`
+--
+ALTER TABLE `ipd_medicine_administration`
+  ADD CONSTRAINT `fk_ipd_med_checkup` FOREIGN KEY (`checkup_id`) REFERENCES `ipd_checkups` (`checkup_id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `fk_ipd_med_visit` FOREIGN KEY (`visit_id`) REFERENCES `visits` (`visit_id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `fk_ipd_med_medication` FOREIGN KEY (`medication_id`) REFERENCES `medications` (`medication_id`),
+  ADD CONSTRAINT `fk_ipd_med_administered` FOREIGN KEY (`administered_by`) REFERENCES `staff` (`staff_id`);
+
+--
+-- Constraints for table `ipd_records`
+--
+ALTER TABLE `ipd_records`
+  ADD CONSTRAINT `fk_ipd_records_visit` FOREIGN KEY (`visit_id`) REFERENCES `visits` (`visit_id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `fk_ipd_records_patient` FOREIGN KEY (`patient_id`) REFERENCES `patients` (`patient_id`),
+  ADD CONSTRAINT `fk_ipd_records_bed` FOREIGN KEY (`bed_id`) REFERENCES `beds` (`bed_id`),
+  ADD CONSTRAINT `fk_ipd_records_ward` FOREIGN KEY (`ward_id`) REFERENCES `wards` (`ward_id`),
+  ADD CONSTRAINT `fk_ipd_records_doctor` FOREIGN KEY (`attending_doctor_id`) REFERENCES `staff` (`staff_id`);
+
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;

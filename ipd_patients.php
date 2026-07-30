@@ -633,16 +633,16 @@ if (isset($_GET['message'])) {
                                     </div>
                                 </div>
                                 <div class="patient-actions">
-                                    <a href="medical_records.php?visit_id=<?php echo $patient['visit_id']; ?>" style="background: #3b82f6;">
+                                    <a href="ipd_patients.php?visit_id=<?php echo $patient['visit_id']; ?>&tab=medical-records" style="background: #3b82f6;">
                                         <i class="fas fa-notes-medical"></i> Records
                                     </a>
-                                    <a href="lab.php?visit_id=<?php echo $patient['visit_id']; ?>" style="background: #10b981;">
+                                    <a href="ipd_patients.php?visit_id=<?php echo $patient['visit_id']; ?>&tab=lab" style="background: #10b981;">
                                         <i class="fas fa-flask"></i> Lab
                                     </a>
-                                    <a href="pharmacy.php?visit_id=<?php echo $patient['visit_id']; ?>" style="background: #f59e0b;">
+                                    <a href="ipd_patients.php?visit_id=<?php echo $patient['visit_id']; ?>&tab=pharmacy" style="background: #f59e0b;">
                                         <i class="fas fa-pills"></i> Pharmacy
                                     </a>
-                                    <a href="ipd_checkups.php?visit_id=<?php echo $patient['visit_id']; ?>" style="background: #8b5cf6;">
+                                    <a href="ipd_patients.php?visit_id=<?php echo $patient['visit_id']; ?>&tab=checkups" style="background: #8b5cf6;">
                                         <i class="fas fa-clipboard-user"></i> Checkups
                                     </a>
                                     <a href="ipd_patients.php?action=discharge&ipd_record_id=<?php echo $patient['ipd_record_id']; ?>" style="background: #ef4444;" onclick="return confirm('Are you sure you want to discharge this patient?');">
@@ -705,189 +705,112 @@ if (isset($_GET['message'])) {
 
                 <!-- Patient Tabs -->
                 <div class="tabs">
-                    <a href="medical_records.php?visit_id=<?php echo $selectedVisitId; ?>" class="tab">
+                    <a href="ipd_patients.php?visit_id=<?php echo $selectedVisitId; ?>&tab=medical-records" class="tab <?php echo $activeTab === 'medical-records' ? 'active' : ''; ?>" id="tab-medical-records">
                         <i class="fas fa-notes-medical"></i> Medical Records
                     </a>
-                    <a href="lab.php?visit_id=<?php echo $selectedVisitId; ?>" class="tab">
+                    <a href="ipd_patients.php?visit_id=<?php echo $selectedVisitId; ?>&tab=lab" class="tab <?php echo $activeTab === 'lab' ? 'active' : ''; ?>" id="tab-lab">
                         <i class="fas fa-flask"></i> Lab
                     </a>
-                    <a href="pharmacy.php?visit_id=<?php echo $selectedVisitId; ?>" class="tab">
+                    <a href="ipd_patients.php?visit_id=<?php echo $selectedVisitId; ?>&tab=pharmacy" class="tab <?php echo $activeTab === 'pharmacy' ? 'active' : ''; ?>" id="tab-pharmacy">
                         <i class="fas fa-pills"></i> Pharmacy
                     </a>
-                    <a href="ipd_checkups.php?visit_id=<?php echo $selectedVisitId; ?>" class="tab">
+                    <a href="ipd_patients.php?visit_id=<?php echo $selectedVisitId; ?>&tab=checkups" class="tab <?php echo $activeTab === 'checkups' ? 'active' : ''; ?>" id="tab-checkups">
                         <i class="fas fa-clipboard-user"></i> Checkups
                     </a>
                 </div>
 
-                <div class="table-card" style="text-align: center; padding: 40px;">
-                    <i class="fas fa-arrow-up" style="font-size: 32px; color: #64748b; margin-bottom: 16px;"></i>
-                    <p style="color: #64748b; font-size: 16px;">Click on a tab above to view patient details</p>
-                </div>
+                <!-- Medical Records Tab Content -->
+                <div class="tab-content <?php echo $activeTab === 'medical-records' ? 'active' : ''; ?>" id="content-medical-records">
                     <div class="table-card">
-                        <h2 style="margin-bottom: 20px;">Create IPD Medical Record</h2>
+                        <h2 style="margin-bottom: 24px; font-size: 24px; color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px;">Create New Medical Record</h2>
                         <form method="POST" action="">
                             <input type="hidden" name="action" value="create_ipd_record">
                             <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
                             <input type="hidden" name="patient_id" value="<?php echo $selectedPatient['patient_id'] ?? 0; ?>">
 
-                            <div class="form-group">
-                                <label>Attending Doctor</label>
-                                <input type="text" value="<?php echo htmlspecialchars($selectedPatient['attending_doctor'] ?? 'N/A'); ?>" readonly style="background: #f1f5f9;">
+                            <div class="form-group" style="margin-bottom: 20px;">
+                                <label style="display: block; font-weight: 600; color: #334155; margin-bottom: 8px;">Attending Doctor</label>
+                                <input type="text" value="<?php echo htmlspecialchars($selectedPatient['attending_doctor'] ?? 'N/A'); ?>" readonly style="width: 100%; padding: 12px 16px; border: 2px solid #e2e8f0; border-radius: 8px; background: #f8fafc; color: #64748b; font-size: 14px;">
                                 <input type="hidden" name="doctor_id" value="<?php echo $selectedPatient['attending_doctor_id'] ?? 0; ?>">
                             </div>
 
-                            <div class="form-group">
-                                <label for="diagnosis">Diagnosis *</label>
-                                <textarea id="diagnosis" name="diagnosis" rows="3" required placeholder="Primary diagnosis and clinical findings..."></textarea>
+                            <div class="form-group" style="margin-bottom: 20px;">
+                                <label for="diagnosis" style="display: block; font-weight: 600; color: #334155; margin-bottom: 8px;">Diagnosis *</label>
+                                <textarea id="diagnosis" name="diagnosis" rows="4" required placeholder="Primary diagnosis and clinical findings..." style="width: 100%; padding: 12px 16px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; font-family: inherit; resize: vertical; transition: border-color 0.2s;"></textarea>
                             </div>
 
-                            <div class="form-group">
-                                <label for="clinical_notes">Clinical Notes</label>
-                                <textarea id="clinical_notes" name="clinical_notes" rows="4" placeholder="Detailed clinical notes, history, and observations..."></textarea>
+                            <div class="form-group" style="margin-bottom: 24px;">
+                                <label for="clinical_notes" style="display: block; font-weight: 600; color: #334155; margin-bottom: 8px;">Clinical Notes</label>
+                                <textarea id="clinical_notes" name="clinical_notes" rows="5" placeholder="Detailed clinical notes, history, and observations..." style="width: 100%; padding: 12px 16px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; font-family: inherit; resize: vertical; transition: border-color 0.2s;"></textarea>
                             </div>
 
-                            <div class="form-group" style="background: #f0fdf4; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
-                                <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-                                    <input type="checkbox" name="needs_lab" value="1" id="needs_lab">
-                                    <strong>Order Lab Tests</strong>
-                                </label>
-                            </div>
-
-                            <div class="form-group" style="background: #fef3c7; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
-                                <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-                                    <input type="checkbox" name="needs_radiology" value="1" id="needs_radiology">
-                                    <strong>Order Radiology Tests</strong>
-                                </label>
-                            </div>
-
-                            <div class="form-group" style="background: #dbeafe; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
-                                <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-                                    <input type="checkbox" name="needs_pharmacy" value="1" id="needs_pharmacy">
-                                    <strong>Order Medications</strong>
-                                </label>
-                            </div>
-
-                            <div class="btn-group">
-                                <button type="submit" class="btn-submit">
+                            <div class="btn-group" style="display: flex; gap: 12px; margin-top: 28px;">
+                                <button type="submit" class="btn-submit" style="flex: 1; padding: 14px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px;">
                                     <i class="fas fa-save"></i> Save Medical Record
                                 </button>
-                                <button type="button" class="btn-cancel" onclick="window.location.href='ipd_patients.php?visit_id=<?php echo $selectedVisitId; ?>'">Cancel</button>
+                                <button type="button" class="btn-cancel" onclick="window.location.href='ipd_patients.php?visit_id=<?php echo $selectedVisitId; ?>&tab=checkups';" style="flex: 1; padding: 14px 24px; background: #f1f5f9; color: #64748b; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.2s;">Cancel</button>
                             </div>
                         </form>
                     </div>
-
-                    <div class="table-card" style="margin-top: 20px;">
-                        <h2 style="margin-bottom: 20px;">IPD Medical Records History</h2>
-                        <?php if (empty($ipdMedicalRecords)): ?>
-                            <p style="text-align: center; color: #94a3b8; padding: 32px;">No IPD medical records found</p>
-                        <?php else: ?>
-                            <?php foreach ($ipdMedicalRecords as $record): ?>
-                            <div class="checkup-card">
-                                <div class="checkup-header">
-                                    <div>
-                                        <strong><?php echo htmlspecialchars($record['doctor_name']); ?></strong>
-                                        <span class="checkup-time"><?php echo date('M d, Y g:i A', strtotime($record['created_at'])); ?></span>
-                                    </div>
-                                </div>
-                                <div class="checkup-notes">
-                                    <strong>Diagnosis:</strong>
-                                    <p style="margin: 4px 0 0 0;"><?php echo nl2br(htmlspecialchars($record['diagnosis'])); ?></p>
-                                </div>
-                                <?php if ($record['clinical_notes']): ?>
-                                <div class="checkup-notes">
-                                    <strong>Clinical Notes:</strong>
-                                    <p style="margin: 4px 0 0 0;"><?php echo nl2br(htmlspecialchars($record['clinical_notes'])); ?></p>
-                                </div>
-                                <?php endif; ?>
-                            </div>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </div>
                 </div>
 
-                <!-- Lab Tab -->
-                <div class="tab-content <?php echo $activeTab === 'lab' ? 'active' : ''; ?>" id="tab-lab">
+                <!-- Lab Tab Content -->
+                <div class="tab-content <?php echo $activeTab === 'lab' ? 'active' : ''; ?>" id="content-lab">
                     <div class="table-card">
-                        <h2 style="margin-bottom: 20px;">Lab Orders History</h2>
-                        <?php if (empty($labOrders)): ?>
-                            <p style="text-align: center; color: #94a3b8; padding: 32px;">No lab orders found</p>
-                        <?php else: ?>
-                            <div class="table-responsive">
-                                <table class="recent-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Test</th>
-                                            <th>Status</th>
-                                            <th>Ordered At</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php foreach ($labOrders as $order): ?>
-                                        <tr>
-                                            <td><?php echo htmlspecialchars($order['test_name']); ?></td>
-                                            <td><?php echo htmlspecialchars($order['status_name']); ?></td>
-                                            <td><?php echo date('M d, Y g:i A', strtotime($order['ordered_at'])); ?></td>
-                                        </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-
-                    <div class="table-card" style="margin-top: 20px;">
-                        <h2 style="margin-bottom: 20px;">Order Lab Tests</h2>
+                        <h2 style="margin-bottom: 24px; font-size: 24px; color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px;">Order Lab Tests</h2>
                         <form method="POST" action="">
                             <input type="hidden" name="action" value="create_lab_order">
                             <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
 
-                            <div class="form-group">
-                                <label>Select Lab Tests *</label>
+                            <div class="form-group" style="margin-bottom: 24px;">
+                                <label style="display: block; font-weight: 600; color: #334155; margin-bottom: 12px;">Select Lab Tests *</label>
                                 <?php foreach ($labCategories as $category => $tests): ?>
-                                    <div style="margin-bottom: 16px;">
-                                        <strong style="display: block; margin-bottom: 8px; color: #64748b;"><?php echo htmlspecialchars($category); ?></strong>
-                                        <?php foreach ($tests as $test): ?>
-                                            <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-                                                <input type="checkbox" name="test_type_ids[]" value="<?php echo $test['test_type_id']; ?>">
-                                                <?php echo htmlspecialchars($test['name']); ?>
-                                            </label>
-                                        <?php endforeach; ?>
+                                    <div style="margin-bottom: 20px; background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                                        <strong style="display: block; margin-bottom: 12px; color: #475569; font-size: 15px; font-weight: 600;"><?php echo htmlspecialchars($category); ?></strong>
+                                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                                            <?php foreach ($tests as $test): ?>
+                                                <label style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: white; border-radius: 6px; border: 1px solid #e2e8f0; cursor: pointer; transition: all 0.2s;">
+                                                    <input type="checkbox" name="test_type_ids[]" value="<?php echo $test['test_type_id']; ?>" style="width: 18px; height: 18px; accent-color: #10b981;">
+                                                    <span style="color: #334155; font-size: 14px;"><?php echo htmlspecialchars($test['name']); ?></span>
+                                                </label>
+                                            <?php endforeach; ?>
+                                        </div>
                                     </div>
                                 <?php endforeach; ?>
                             </div>
 
-                            <div class="btn-group">
-                                <button type="submit" class="btn-submit">
+                            <div class="btn-group" style="display: flex; gap: 12px; margin-top: 28px;">
+                                <button type="submit" class="btn-submit" style="flex: 1; padding: 14px 24px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px;">
                                     <i class="fas fa-flask"></i> Order Lab Tests
                                 </button>
-                                <button type="button" class="btn-cancel" onclick="window.location.href='ipd_patients.php?tab=lab&visit_id=<?php echo $selectedVisitId; ?>'">Cancel</button>
+                                <button type="button" class="btn-cancel" onclick="window.location.href='ipd_patients.php?visit_id=<?php echo $selectedVisitId; ?>&tab=checkups';" style="flex: 1; padding: 14px 24px; background: #f1f5f9; color: #64748b; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.2s;">Cancel</button>
                             </div>
                         </form>
                     </div>
                 </div>
 
-                <!-- Pharmacy Tab -->
-                <div class="tab-content <?php echo $activeTab === 'pharmacy' ? 'active' : ''; ?>" id="tab-pharmacy">
+                <!-- Pharmacy Tab Content -->
+                <div class="tab-content <?php echo $activeTab === 'pharmacy' ? 'active' : ''; ?>" id="content-pharmacy">
                     <div class="table-card">
-                        <h2 style="margin-bottom: 20px;">Create Prescription</h2>
+                        <h2 style="margin-bottom: 24px; font-size: 24px; color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px;">Create Prescription</h2>
                         <form method="POST" action="">
                             <input type="hidden" name="action" value="create_prescription">
                             <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
                             <input type="hidden" name="patient_id" value="<?php echo $selectedPatient['patient_id'] ?? 0; ?>">
 
-                            <div class="form-group">
-                                <label>Prescribing Doctor</label>
-                                <input type="text" value="<?php echo htmlspecialchars($selectedPatient['attending_doctor'] ?? 'N/A'); ?>" readonly style="background: #f1f5f9;">
+                            <div class="form-group" style="margin-bottom: 20px;">
+                                <label style="display: block; font-weight: 600; color: #334155; margin-bottom: 8px;">Prescribing Doctor</label>
+                                <input type="text" value="<?php echo htmlspecialchars($selectedPatient['attending_doctor'] ?? 'N/A'); ?>" readonly style="width: 100%; padding: 12px 16px; border: 2px solid #e2e8f0; border-radius: 8px; background: #f8fafc; color: #64748b; font-size: 14px;">
                                 <input type="hidden" name="doctor_id" value="<?php echo $selectedPatient['attending_doctor_id'] ?? 0; ?>">
                             </div>
 
-                            <div class="form-group">
-                                <label>Medications *</label>
+                            <div class="form-group" style="margin-bottom: 24px;">
+                                <label style="display: block; font-weight: 600; color: #334155; margin-bottom: 12px;">Medications *</label>
                                 <div id="medication_container">
-                                    <div class="form-row" style="margin-bottom: 12px;">
+                                    <div class="form-row" style="margin-bottom: 16px; display: flex; gap: 12px;">
                                         <div class="form-group" style="flex: 2;">
-                                            <label>Medication</label>
-                                            <select name="medications[0][medication_id]" required>
+                                            <label style="display: block; font-weight: 500; color: #475569; margin-bottom: 6px; font-size: 13px;">Medication</label>
+                                            <select name="medications[0][medication_id]" required style="width: 100%; padding: 10px 14px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px; background: white;">
                                                 <option value="">Select medication...</option>
                                                 <?php foreach ($medications as $med): ?>
                                                     <option value="<?php echo $med['medication_id']; ?>">
@@ -897,145 +820,166 @@ if (isset($_GET['message'])) {
                                             </select>
                                         </div>
                                         <div class="form-group" style="flex: 1;">
-                                            <label>Dosage</label>
-                                            <input type="text" name="medications[0][dosage]" placeholder="e.g., 500mg">
+                                            <label style="display: block; font-weight: 500; color: #475569; margin-bottom: 6px; font-size: 13px;">Dosage</label>
+                                            <input type="text" name="medications[0][dosage]" placeholder="e.g., 500mg" style="width: 100%; padding: 10px 14px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
                                         </div>
                                         <div class="form-group" style="flex: 1;">
-                                            <label>Duration (days)</label>
-                                            <input type="number" name="medications[0][duration_days]" min="1" value="1">
+                                            <label style="display: block; font-weight: 500; color: #475569; margin-bottom: 6px; font-size: 13px;">Duration (days)</label>
+                                            <input type="number" name="medications[0][duration_days]" min="1" value="1" style="width: 100%; padding: 10px 14px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
                                         </div>
                                         <div class="form-group" style="flex: 1;">
-                                            <label>Quantity</label>
-                                            <input type="number" name="medications[0][quantity]" min="1" value="1">
+                                            <label style="display: block; font-weight: 500; color: #475569; margin-bottom: 6px; font-size: 13px;">Quantity</label>
+                                            <input type="number" name="medications[0][quantity]" min="1" value="1" style="width: 100%; padding: 10px 14px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
                                         </div>
                                         <div class="form-group" style="flex: 2;">
-                                            <label>Notes</label>
-                                            <input type="text" name="medications[0][note]" placeholder="Optional notes">
+                                            <label style="display: block; font-weight: 500; color: #475569; margin-bottom: 6px; font-size: 13px;">Notes</label>
+                                            <input type="text" name="medications[0][note]" placeholder="Optional notes" style="width: 100%; padding: 10px 14px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
                                         </div>
                                     </div>
                                 </div>
-                                <button type="button" onclick="addMedicationRow()" class="btn-cancel" style="margin-top: 8px; width: 100%; border-style: dashed;">
+                                <button type="button" onclick="addMedicationRow()" style="margin-top: 12px; width: 100%; padding: 12px; background: #f8fafc; color: #64748b; border: 2px dashed #cbd5e1; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px;">
                                     <i class="fas fa-plus"></i> Add Another Medication
                                 </button>
                             </div>
 
-                            <div class="form-group">
-                                <label for="notes">Prescription Notes</label>
-                                <textarea id="notes" name="notes" rows="3" placeholder="Additional instructions..."></textarea>
+                            <div class="form-group" style="margin-bottom: 24px;">
+                                <label for="notes" style="display: block; font-weight: 600; color: #334155; margin-bottom: 8px;">Prescription Notes</label>
+                                <textarea id="notes" name="notes" rows="4" placeholder="Additional instructions..." style="width: 100%; padding: 12px 16px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; font-family: inherit; resize: vertical; transition: border-color 0.2s;"></textarea>
                             </div>
 
-                            <div class="btn-group">
-                                <button type="submit" class="btn-submit">
+                            <div class="btn-group" style="display: flex; gap: 12px; margin-top: 28px;">
+                                <button type="submit" class="btn-submit" style="flex: 1; padding: 14px 24px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px;">
                                     <i class="fas fa-prescription"></i> Create Prescription
                                 </button>
-                                <button type="button" class="btn-cancel" onclick="window.location.href='ipd_patients.php?tab=pharmacy&visit_id=<?php echo $selectedVisitId; ?>'">Cancel</button>
+                                <button type="button" class="btn-cancel" onclick="window.location.href='ipd_patients.php?visit_id=<?php echo $selectedVisitId; ?>&tab=checkups';" style="flex: 1; padding: 14px 24px; background: #f1f5f9; color: #64748b; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.2s;">Cancel</button>
                             </div>
                         </form>
                     </div>
-
-                    <div class="table-card" style="margin-top: 20px;">
-                        <h2 style="margin-bottom: 20px;">Prescription History</h2>
-                        <?php if (empty($prescriptions)): ?>
-                            <p style="text-align: center; color: #94a3b8; padding: 32px;">No prescriptions found</p>
-                        <?php else: ?>
-                            <div class="table-responsive">
-                                <table class="recent-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Prescribed By</th>
-                                            <th>Notes</th>
-                                            <th>Status</th>
-                                            <th>Created At</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php foreach ($prescriptions as $rx): ?>
-                                        <tr>
-                                            <td><?php echo htmlspecialchars($rx['doctor_name']); ?></td>
-                                            <td><?php echo htmlspecialchars($rx['notes'] ?? '-'); ?></td>
-                                            <td><?php echo htmlspecialchars($rx['status']); ?></td>
-                                            <td><?php echo date('M d, Y g:i A', strtotime($rx['created_at'])); ?></td>
-                                        </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                        <?php endif; ?>
-                    </div>
                 </div>
 
-                <!-- Checkups Tab -->
-                <div class="tab-content <?php echo $activeTab === 'checkups' ? 'active' : ''; ?>" id="tab-checkups">
+                <!-- Checkups Tab Content -->
+                <div class="tab-content <?php echo $activeTab === 'checkups' ? 'active' : ''; ?>" id="content-checkups">
+                    <?php if ($selectedPatient): ?>
+                    <div class="table-card" style="margin-bottom: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <h2 style="margin: 0; color: white;"><?php echo htmlspecialchars($selectedPatient['patient_name']); ?></h2>
+                                <p style="margin: 4px 0 0 0; opacity: 0.9;">
+                                    <?php echo htmlspecialchars($selectedPatient['patient_code']); ?> ·
+                                    <?php echo htmlspecialchars($selectedPatient['visit_code']); ?> ·
+                                    Age: <?php echo htmlspecialchars($selectedPatient['age'] ?? 'N/A'); ?> ·
+                                    <?php echo htmlspecialchars($selectedPatient['gender'] ?? 'N/A'); ?>
+                                </p>
+                            </div>
+                            <div style="text-align: right;">
+                                <p style="margin: 0; opacity: 0.9;">Ward/Bed</p>
+                                <p style="margin: 4px 0 0 0; font-weight: 600;"><?php echo htmlspecialchars($selectedPatient['ward_name'] ?? 'N/A'); ?> / <?php echo htmlspecialchars($selectedPatient['bed_number'] ?? 'N/A'); ?></p>
+                            </div>
+                        </div>
+                    </div>
+                    <?php endif; ?>
+
                     <div class="table-card">
-                        <h2 style="margin-bottom: 20px;">New Checkup</h2>
+                        <h2 style="margin-bottom: 24px; font-size: 24px; color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px;">New Checkup</h2>
                         <form method="POST" action="">
                             <input type="hidden" name="action" value="create_checkup">
                             <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
                             <input type="hidden" name="patient_id" value="<?php echo $selectedPatient['patient_id'] ?? 0; ?>">
 
-                            <div class="form-group">
-                                <label for="progress_notes">Progress Notes</label>
-                                <textarea id="progress_notes" name="progress_notes" rows="4" placeholder="Detailed progress notes, observations, and updates..."></textarea>
+                            <div class="form-group" style="margin-bottom: 20px;">
+                                <label for="checkup_time" style="display: block; font-weight: 600; color: #334155; margin-bottom: 8px;">Checkup Time</label>
+                                <input type="datetime-local" id="checkup_time" name="checkup_time" value="<?php echo date('Y-m-d\TH:i'); ?>" style="width: 100%; padding: 12px 16px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px;">
                             </div>
 
-                            <div class="form-group">
-                                <label for="vital_signs">Vital Signs</label>
-                                <textarea id="vital_signs" name="vital_signs" rows="2" placeholder="e.g., BP: 120/80, Pulse: 72, Temp: 98.6°F, SpO2: 98%"></textarea>
+                            <div class="form-group" style="margin-bottom: 20px;">
+                                <label for="progress_notes" style="display: block; font-weight: 600; color: #334155; margin-bottom: 8px;">Progress Notes *</label>
+                                <textarea id="progress_notes" name="progress_notes" rows="5" required placeholder="Patient progress, symptoms, observations..." style="width: 100%; padding: 12px 16px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; font-family: inherit; resize: vertical; transition: border-color 0.2s;"></textarea>
                             </div>
 
-                            <div class="form-row">
-                                <div class="form-group" style="flex: 1;">
-                                    <label for="glucose_level">Glucose Level</label>
-                                    <input type="number" id="glucose_level" name="glucose_level" step="0.1" placeholder="e.g., 120">
-                                </div>
-                                <div class="form-group" style="flex: 1;">
-                                    <label for="glucose_unit">Unit</label>
-                                    <select id="glucose_unit" name="glucose_unit">
-                                        <option value="mg/dL">mg/dL</option>
-                                        <option value="mmol/L">mmol/L</option>
-                                    </select>
-                                </div>
-                                <div class="form-group" style="flex: 1;">
-                                    <label for="glucose_type">Type</label>
-                                    <select id="glucose_type" name="glucose_type">
-                                        <option value="Random">Random</option>
-                                        <option value="Fasting">Fasting</option>
-                                        <option value="Postprandial">Postprandial</option>
-                                        <option value="HbA1c">HbA1c</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            <div class="form-group" style="background: #fef2f2; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
-                                <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-                                    <input type="checkbox" name="injection_given" value="1" id="injection_given" onchange="toggleInjectionFields()">
-                                    <strong>Injection Given</strong>
+                            <div class="form-group" style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 2px solid #bfdbfe;">
+                                <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px; cursor: pointer;">
+                                    <input type="checkbox" name="vital_signs_check" value="1" id="vital_signs_check" onchange="toggleVitalSignsFields()" style="width: 20px; height: 20px; accent-color: #3b82f6;">
+                                    <strong style="color: #1e40af; font-size: 16px;">Record Vital Signs</strong>
                                 </label>
-                                <div id="injection_fields" style="display: none; margin-top: 12px;">
-                                    <div class="form-row">
+                                <div id="vital_signs_fields" style="display: none; margin-top: 16px;">
+                                    <div class="form-row" style="display: flex; gap: 12px;">
                                         <div class="form-group" style="flex: 1;">
-                                            <label for="injection_type">Injection Type</label>
-                                            <input type="text" id="injection_type" name="injection_type" placeholder="e.g., Insulin, Antibiotic">
+                                            <label style="display: block; font-weight: 500; color: #475569; margin-bottom: 6px; font-size: 13px;">BP (mmHg)</label>
+                                            <input type="text" name="vital_signs" placeholder="e.g., 120/80" style="width: 100%; padding: 10px 14px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
                                         </div>
                                         <div class="form-group" style="flex: 1;">
-                                            <label for="injection_dosage">Dosage</label>
-                                            <input type="text" id="injection_dosage" name="injection_dosage" placeholder="e.g., 10 units, 500mg">
+                                            <label style="display: block; font-weight: 500; color: #475569; margin-bottom: 6px; font-size: 13px;">Pulse (bpm)</label>
+                                            <input type="number" name="pulse" placeholder="e.g., 72" style="width: 100%; padding: 10px 14px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
+                                        </div>
+                                        <div class="form-group" style="flex: 1;">
+                                            <label style="display: block; font-weight: 500; color: #475569; margin-bottom: 6px; font-size: 13px;">Temp (°C)</label>
+                                            <input type="number" step="0.1" name="temperature" placeholder="e.g., 37.0" style="width: 100%; padding: 10px 14px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
                                         </div>
                                     </div>
                                 </div>
                             </div>
 
-                            <div class="form-group" style="background: #f0fdf4; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
-                                <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-                                    <input type="checkbox" name="medicine_given" value="1" id="medicine_given" onchange="toggleMedicineFields()">
-                                    <strong>Medicine Administered</strong>
+                            <div class="form-group" style="background: linear-gradient(135deg, #fefce8 0%, #fef3c7 100%); padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 2px solid #fde68a;">
+                                <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px; cursor: pointer;">
+                                    <input type="checkbox" name="glucose_check" value="1" id="glucose_check" onchange="toggleGlucoseFields()" style="width: 20px; height: 20px; accent-color: #f59e0b;">
+                                    <strong style="color: #92400e; font-size: 16px;">Glucose Monitoring</strong>
                                 </label>
-                                <div id="medicine_fields" style="display: none; margin-top: 12px;">
+                                <div id="glucose_fields" style="display: none; margin-top: 16px;">
+                                    <div class="form-row" style="display: flex; gap: 12px;">
+                                        <div class="form-group" style="flex: 1;">
+                                            <label style="display: block; font-weight: 500; color: #475569; margin-bottom: 6px; font-size: 13px;">Glucose Level</label>
+                                            <input type="number" step="0.1" name="glucose_level" placeholder="e.g., 120" style="width: 100%; padding: 10px 14px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
+ </div>
+                                        <div class="form-group" style="flex: 1;">
+                                            <label style="display: block; font-weight: 500; color: #475569; margin-bottom: 6px; font-size: 13px;">Unit</label>
+                                            <select name="glucose_unit" style="width: 100%; padding: 10px 14px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px; background: white;">
+                                                <option value="mg/dL">mg/dL</option>
+                                                <option value="mmol/L">mmol/L</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group" style="flex: 1;">
+                                            <label style="display: block; font-weight: 500; color: #475569; margin-bottom: 6px; font-size: 13px;">Type</label>
+                                            <select name="glucose_type" style="width: 100%; padding: 10px 14px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px; background: white;">
+                                                <option value="Random">Random</option>
+                                                <option value="Fasting">Fasting</option>
+                                                <option value="Postprandial">Postprandial</option>
+                                                <option value="HbA1c">HbA1c</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 2px solid #fca5a5;">
+                                <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px; cursor: pointer;">
+                                    <input type="checkbox" name="injection_given" value="1" id="injection_given" onchange="toggleInjectionFields()" style="width: 20px; height: 20px; accent-color: #ef4444;">
+                                    <strong style="color: #991b1b; font-size: 16px;">Injection Given</strong>
+                                </label>
+                                <div id="injection_fields" style="display: none; margin-top: 16px;">
+                                    <div class="form-row" style="display: flex; gap: 12px;">
+                                        <div class="form-group" style="flex: 1;">
+                                            <label for="injection_type" style="display: block; font-weight: 500; color: #475569; margin-bottom: 6px; font-size: 13px;">Injection Type</label>
+                                            <input type="text" id="injection_type" name="injection_type" placeholder="e.g., Insulin, Antibiotic" style="width: 100%; padding: 10px 14px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
+                                        </div>
+                                        <div class="form-group" style="flex: 1;">
+                                            <label for="injection_dosage" style="display: block; font-weight: 500; color: #475569; margin-bottom: 6px; font-size: 13px;">Dosage</label>
+                                            <input type="text" id="injection_dosage" name="injection_dosage" placeholder="e.g., 10 units, 500mg" style="width: 100%; padding: 10px 14px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 2px solid #86efac;">
+                                <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px; cursor: pointer;">
+                                    <input type="checkbox" name="medicine_given" value="1" id="medicine_given" onchange="toggleMedicineFields()" style="width: 20px; height: 20px; accent-color: #22c55e;">
+                                    <strong style="color: #166534; font-size: 16px;">Medicine Administered</strong>
+                                </label>
+                                <div id="medicine_fields" style="display: none; margin-top: 16px;">
                                     <div id="checkup_medication_container">
-                                        <div class="form-row" style="margin-bottom: 12px;">
+                                        <div class="form-row" style="margin-bottom: 16px; display: flex; gap: 12px;">
                                             <div class="form-group" style="flex: 2;">
-                                                <label>Medication</label>
-                                                <select name="medications[0][medication_id]">
+                                                <label style="display: block; font-weight: 500; color: #475569; margin-bottom: 6px; font-size: 13px;">Medication</label>
+                                                <select name="medications[0][medication_id]" style="width: 100%; padding: 10px 14px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px; background: white;">
                                                     <option value="">Select medication...</option>
                                                     <?php foreach ($medications as $med): ?>
                                                         <option value="<?php echo $med['medication_id']; ?>">
@@ -1045,80 +989,37 @@ if (isset($_GET['message'])) {
                                                 </select>
                                             </div>
                                             <div class="form-group" style="flex: 1;">
-                                                <label>Dosage</label>
-                                                <input type="text" name="medications[0][dosage]" placeholder="e.g., 500mg">
+                                                <label style="display: block; font-weight: 500; color: #475569; margin-bottom: 6px; font-size: 13px;">Dosage</label>
+                                                <input type="text" name="medications[0][dosage]" placeholder="e.g., 500mg" style="width: 100%; padding: 10px 14px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
                                             </div>
                                             <div class="form-group" style="flex: 1;">
-                                                <label>Quantity</label>
-                                                <input type="number" name="medications[0][quantity]" min="1" value="1">
+                                                <label style="display: block; font-weight: 500; color: #475569; margin-bottom: 6px; font-size: 13px;">Quantity</label>
+                                                <input type="number" name="medications[0][quantity]" min="1" value="1" style="width: 100%; padding: 10px 14px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
                                             </div>
                                             <div class="form-group" style="flex: 2;">
-                                                <label>Notes</label>
-                                                <input type="text" name="medications[0][notes]" placeholder="Optional notes">
+                                                <label style="display: block; font-weight: 500; color: #475569; margin-bottom: 6px; font-size: 13px;">Notes</label>
+                                                <input type="text" name="medications[0][notes]" placeholder="Optional notes" style="width: 100%; padding: 10px 14px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
                                             </div>
                                         </div>
                                     </div>
-                                    <button type="button" onclick="addCheckupMedicationRow()" class="btn-cancel" style="margin-top: 8px; width: 100%; border-style: dashed;">
+                                    <button type="button" onclick="addCheckupMedicationRow()" style="margin-top: 12px; width: 100%; padding: 12px; background: #f0fdf4; color: #166534; border: 2px dashed #86efac; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px;">
                                         <i class="fas fa-plus"></i> Add Another Medication
                                     </button>
                                 </div>
                             </div>
 
-                            <div class="form-group">
-                                <label for="medicine_notes">General Medicine Notes</label>
-                                <textarea id="medicine_notes" name="medicine_notes" rows="2" placeholder="Additional notes about medication administration..."></textarea>
+                            <div class="form-group" style="margin-bottom: 24px;">
+                                <label for="medicine_notes" style="display: block; font-weight: 600; color: #334155; margin-bottom: 8px;">General Medicine Notes</label>
+                                <textarea id="medicine_notes" name="medicine_notes" rows="3" placeholder="Additional notes about medication administration..." style="width: 100%; padding: 12px 16px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; font-family: inherit; resize: vertical; transition: border-color 0.2s;"></textarea>
                             </div>
 
-                            <div class="btn-group">
-                                <button type="submit" class="btn-submit">
+                            <div class="btn-group" style="display: flex; gap: 12px; margin-top: 28px;">
+                                <button type="submit" class="btn-submit" style="flex: 1; padding: 14px 24px; background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px;">
                                     <i class="fas fa-save"></i> Save Checkup
                                 </button>
-                                <button type="button" class="btn-cancel" onclick="window.location.href='ipd_patients.php?tab=checkups&visit_id=<?php echo $selectedVisitId; ?>'">Cancel</button>
+                                <button type="button" class="btn-cancel" style="flex: 1; padding: 14px 24px; background: #f1f5f9; color: #64748b; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.2s;">Cancel</button>
                             </div>
                         </form>
-                    </div>
-
-                    <div class="table-card" style="margin-top: 20px;">
-                        <h2 style="margin-bottom: 20px;">Checkup History</h2>
-                        <?php if (empty($checkups)): ?>
-                            <p style="text-align: center; color: #94a3b8; padding: 32px;">No checkups recorded yet</p>
-                        <?php else: ?>
-                            <?php foreach ($checkups as $checkup): ?>
-                            <div class="checkup-card">
-                                <div class="checkup-header">
-                                    <div>
-                                        <strong><?php echo htmlspecialchars($checkup['recorded_by_name']); ?></strong>
-                                        <span class="checkup-time"><?php echo date('M d, Y g:i A', strtotime($checkup['checkup_time'])); ?></span>
-                                    </div>
-                                </div>
-
-                                <?php if ($checkup['progress_notes']): ?>
-                                    <div class="checkup-notes">
-                                        <strong>Progress Notes:</strong>
-                                        <p style="margin: 4px 0 0 0;"><?php echo nl2br(htmlspecialchars($checkup['progress_notes'])); ?></p>
-                                    </div>
-                                <?php endif; ?>
-
-                                <?php if ($checkup['vital_signs']): ?>
-                                    <div style="margin-bottom: 12px;">
-                                        <span class="vital-badge"><i class="fas fa-heartbeat"></i> <?php echo htmlspecialchars($checkup['vital_signs']); ?></span>
-                                    </div>
-                                <?php endif; ?>
-
-                                <?php if ($checkup['glucose_level']): ?>
-                                    <div style="margin-bottom: 12px;">
-                                        <span class="glucose-badge"><i class="fas fa-tint"></i> Glucose: <?php echo $checkup['glucose_level']; ?> <?php echo htmlspecialchars($checkup['glucose_unit']); ?> (<?php echo htmlspecialchars($checkup['glucose_type']); ?>)</span>
-                                    </div>
-                                <?php endif; ?>
-
-                                <?php if ($checkup['injection_given']): ?>
-                                    <div style="margin-bottom: 12px;">
-                                        <span class="injection-badge"><i class="fas fa-syringe"></i> Injection: <?php echo htmlspecialchars($checkup['injection_type']); ?> - <?php echo htmlspecialchars($checkup['injection_dosage']); ?></span>
-                                    </div>
-                                <?php endif; ?>
-                            </div>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
                     </div>
                 </div>
             <?php endif; ?>
@@ -1128,6 +1029,36 @@ if (isset($_GET['message'])) {
     <script>
         let medicationCount = 0;
         let checkupMedicationCount = 0;
+
+        function showTab(tabName) {
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            
+            // Remove active class from all tabs
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Show selected tab content
+            document.getElementById('content-' + tabName).classList.add('active');
+            
+            // Add active class to selected tab
+            document.getElementById('tab-' + tabName).classList.add('active');
+        }
+
+        function toggleVitalSignsFields() {
+            const checkbox = document.getElementById('vital_signs_check');
+            const fields = document.getElementById('vital_signs_fields');
+            fields.style.display = checkbox.checked ? 'block' : 'none';
+        }
+
+        function toggleGlucoseFields() {
+            const checkbox = document.getElementById('glucose_check');
+            const fields = document.getElementById('glucose_fields');
+            fields.style.display = checkbox.checked ? 'block' : 'none';
+        }
 
         function toggleInjectionFields() {
             const checkbox = document.getElementById('injection_given');

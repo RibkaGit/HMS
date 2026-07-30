@@ -60,6 +60,79 @@ if ($selectedVisitId > 0) {
     }
 }
 
+// Fetch lab orders for selected visit
+$labOrders = [];
+if ($selectedVisitId > 0) {
+    $labOrdersQuery = "SELECT lo.*, ltt.name as test_name, ltt.category as test_category, los.name as status_name
+                       FROM lab_orders lo
+                       JOIN lookup_test_types ltt ON lo.test_type_id = ltt.test_type_id
+                       JOIN lookup_order_statuses los ON lo.order_status_id = los.order_status_id
+                       WHERE lo.visit_id = ?
+                       ORDER BY lo.created_at DESC";
+    $labOrdersStmt = $conn->prepare($labOrdersQuery);
+    if ($labOrdersStmt) {
+        $labOrdersStmt->bind_param('i', $selectedVisitId);
+        $labOrdersStmt->execute();
+        $labOrders = $labOrdersStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    } else {
+        $labOrders = [];
+    }
+}
+
+// Fetch prescriptions for selected visit
+$prescriptions = [];
+if ($selectedVisitId > 0) {
+    $prescriptionsQuery = "SELECT p.*, CONCAT(s.first_name, ' ', s.last_name) as doctor_name
+                           FROM prescriptions p
+                           LEFT JOIN staff s ON p.doctor_id = s.staff_id
+                           WHERE p.visit_id = ?
+                           ORDER BY p.created_at DESC";
+    $prescriptionsStmt = $conn->prepare($prescriptionsQuery);
+    if ($prescriptionsStmt) {
+        $prescriptionsStmt->bind_param('i', $selectedVisitId);
+        $prescriptionsStmt->execute();
+        $prescriptions = $prescriptionsStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    } else {
+        $prescriptions = [];
+    }
+}
+
+// Fetch medical records for selected visit
+$medicalRecords = [];
+if ($selectedVisitId > 0) {
+    $medicalRecordsQuery = "SELECT mr.*, CONCAT(s.first_name, ' ', s.last_name) as doctor_name
+                            FROM medical_records mr
+                            LEFT JOIN staff s ON mr.doctor_id = s.staff_id
+                            WHERE mr.visit_id = ?
+                            ORDER BY mr.created_at DESC";
+    $medicalRecordsStmt = $conn->prepare($medicalRecordsQuery);
+    if ($medicalRecordsStmt) {
+        $medicalRecordsStmt->bind_param('i', $selectedVisitId);
+        $medicalRecordsStmt->execute();
+        $medicalRecords = $medicalRecordsStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    } else {
+        $medicalRecords = [];
+    }
+}
+
+// Fetch checkups for selected visit
+$checkups = [];
+if ($selectedVisitId > 0) {
+    $checkupsQuery = "SELECT ic.*, CONCAT(s.first_name, ' ', s.last_name) as recorded_by_name
+                      FROM ipd_checkups ic
+                      LEFT JOIN staff s ON ic.recorded_by = s.staff_id
+                      WHERE ic.visit_id = ?
+                      ORDER BY ic.checkup_time DESC";
+    $checkupsStmt = $conn->prepare($checkupsQuery);
+    if ($checkupsStmt) {
+        $checkupsStmt->bind_param('i', $selectedVisitId);
+        $checkupsStmt->execute();
+        $checkups = $checkupsStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    } else {
+        $checkups = [];
+    }
+}
+
 // ============================================================================
 // CREATE IPD MEDICAL RECORD
 // ============================================================================
@@ -76,7 +149,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $query = "INSERT INTO medical_records (visit_id, patient_id, doctor_id, diagnosis, clinical_notes, needs_lab, needs_radiology, needs_pharmacy, record_type)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'IPD')";
     $stmt = $conn->prepare($query);
-    $stmt->bind_param('iisssiii',
+    $stmt->bind_param('iiisiiii',
         $visitId,
         $patientId,
         $doctorId,
@@ -91,7 +164,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $recordId = $conn->insert_id;
         logUserActivity($conn, $_SESSION['user_id'], 'Created IPD Medical Record', "Created IPD medical record ID: {$recordId} for visit ID: {$visitId}");
         $message = 'IPD medical record created successfully!';
-        header('Location: ipd_patients.php?tab=medical_records&visit_id=' . $visitId . '&message=' . urlencode($message));
+        header('Location: ipd_patients.php?visit_id=' . $visitId . '&tab=medical-records&message=' . urlencode($message));
         exit();
     } else {
         $error = 'Failed to create IPD medical record. Please try again.';
@@ -141,7 +214,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         updateVisitStatus($conn, $visitId, 'Awaiting Results');
         logUserActivity($conn, $_SESSION['user_id'], 'Created Lab Orders', "Created {$createdCount} lab order(s) for IPD visit ID: {$visitId}");
         $message = 'Lab order created successfully!';
-        header('Location: ipd_patients.php?tab=lab&visit_id=' . $visitId . '&message=' . urlencode($message));
+        header('Location: ipd_patients.php?visit_id=' . $visitId . '&tab=lab&message=' . urlencode($message));
         exit();
     } else {
         $error = 'Select at least one lab test and try again.';
@@ -186,7 +259,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
         logUserActivity($conn, $_SESSION['user_id'], 'Created IPD Prescription', "Created prescription ID: {$prescriptionId} for IPD visit ID: {$visitId}");
         $message = 'Prescription created successfully!';
-        header('Location: ipd_patients.php?tab=pharmacy&visit_id=' . $visitId . '&message=' . urlencode($message));
+        header('Location: ipd_patients.php?visit_id=' . $visitId . '&tab=pharmacy&message=' . urlencode($message));
         exit();
     } else {
         $error = 'Failed to create prescription. Please try again.';
@@ -645,6 +718,9 @@ if (isset($_GET['message'])) {
                                     <a href="ipd_patients.php?visit_id=<?php echo $patient['visit_id']; ?>&tab=checkups" style="background: #8b5cf6;">
                                         <i class="fas fa-clipboard-user"></i> Checkups
                                     </a>
+                                    <a href="ipd_patients.php?visit_id=<?php echo $patient['visit_id']; ?>&tab=history" style="background: #6366f1;">
+                                        <i class="fas fa-history"></i> History
+                                    </a>
                                     <a href="ipd_patients.php?action=discharge&ipd_record_id=<?php echo $patient['ipd_record_id']; ?>" style="background: #ef4444;" onclick="return confirm('Are you sure you want to discharge this patient?');">
                                         <i class="fas fa-sign-out-alt"></i> Discharge
                                     </a>
@@ -717,6 +793,9 @@ if (isset($_GET['message'])) {
                     <a href="ipd_patients.php?visit_id=<?php echo $selectedVisitId; ?>&tab=checkups" class="tab <?php echo $activeTab === 'checkups' ? 'active' : ''; ?>" id="tab-checkups">
                         <i class="fas fa-clipboard-user"></i> Checkups
                     </a>
+                    <a href="ipd_patients.php?visit_id=<?php echo $selectedVisitId; ?>&tab=history" class="tab <?php echo $activeTab === 'history' ? 'active' : ''; ?>" id="tab-history">
+                        <i class="fas fa-history"></i> History
+                    </a>
                 </div>
 
                 <!-- Medical Records Tab Content -->
@@ -787,6 +866,44 @@ if (isset($_GET['message'])) {
                             </div>
                         </form>
                     </div>
+
+                    <?php if (!empty($labOrders)): ?>
+                    <div class="table-card" style="margin-top: 24px;">
+                        <h3 style="margin-bottom: 20px; font-size: 20px; color: #1e293b;">Lab Orders History</h3>
+                        <div style="overflow-x: auto;">
+                            <table style="width: 100%; border-collapse: collapse;">
+                                <thead>
+                                    <tr style="background: #f8fafc;">
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Test Name</th>
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Category</th>
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Status</th>
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Ordered Date</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($labOrders as $order): ?>
+                                    <tr style="border-bottom: 1px solid #e2e8f0;">
+                                        <td style="padding: 12px 16px; color: #334155;"><?php echo htmlspecialchars($order['test_name']); ?></td>
+                                        <td style="padding: 12px 16px; color: #64748b;"><?php echo htmlspecialchars($order['test_category']); ?></td>
+                                        <td style="padding: 12px 16px;">
+                                            <span style="padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; 
+                                                <?php 
+                                                if ($order['status_name'] === 'Ordered') echo 'background: #fef3c7; color: #92400e;';
+                                                elseif ($order['status_name'] === 'Sample Collected') echo 'background: #dbeafe; color: #1e40af;';
+                                                elseif ($order['status_name'] === 'Results Ready') echo 'background: #dcfce7; color: #166534;';
+                                                else echo 'background: #f1f5f9; color: #64748b;';
+                                                ?>">
+                                                <?php echo htmlspecialchars($order['status_name']); ?>
+                                            </span>
+                                        </td>
+                                        <td style="padding: 12px 16px; color: #64748b;"><?php echo date('M d, Y H:i', strtotime($order['created_at'])); ?></td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <?php endif; ?>
                 </div>
 
                 <!-- Pharmacy Tab Content -->
@@ -855,6 +972,43 @@ if (isset($_GET['message'])) {
                             </div>
                         </form>
                     </div>
+
+                    <?php if (!empty($prescriptions)): ?>
+                    <div class="table-card" style="margin-top: 24px;">
+                        <h3 style="margin-bottom: 20px; font-size: 20px; color: #1e293b;">Prescriptions History</h3>
+                        <div style="overflow-x: auto;">
+                            <table style="width: 100%; border-collapse: collapse;">
+                                <thead>
+                                    <tr style="background: #f8fafc;">
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Prescription ID</th>
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Doctor</th>
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Status</th>
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Created Date</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($prescriptions as $prescription): ?>
+                                    <tr style="border-bottom: 1px solid #e2e8f0;">
+                                        <td style="padding: 12px 16px; color: #334155; font-weight: 600;">#<?php echo $prescription['prescription_id']; ?></td>
+                                        <td style="padding: 12px 16px; color: #64748b;"><?php echo htmlspecialchars($prescription['doctor_name'] ?? 'N/A'); ?></td>
+                                        <td style="padding: 12px 16px;">
+                                            <span style="padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; 
+                                                <?php 
+                                                if ($prescription['status'] === 'Pending') echo 'background: #fef3c7; color: #92400e;';
+                                                elseif ($prescription['status'] === 'Dispensed') echo 'background: #dcfce7; color: #166534;';
+                                                else echo 'background: #f1f5f9; color: #64748b;';
+                                                ?>">
+                                                <?php echo htmlspecialchars($prescription['status']); ?>
+                                            </span>
+                                        </td>
+                                        <td style="padding: 12px 16px; color: #64748b;"><?php echo date('M d, Y H:i', strtotime($prescription['created_at'])); ?></td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <?php endif; ?>
                 </div>
 
                 <!-- Checkups Tab Content -->
@@ -1020,6 +1174,178 @@ if (isset($_GET['message'])) {
                                 <button type="button" class="btn-cancel" style="flex: 1; padding: 14px 24px; background: #f1f5f9; color: #64748b; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.2s;">Cancel</button>
                             </div>
                         </form>
+                    </div>
+                </div>
+
+                <!-- History Tab Content -->
+                <div class="tab-content <?php echo $activeTab === 'history' ? 'active' : ''; ?>" id="content-history">
+                    <?php if ($selectedPatient): ?>
+                    <div class="table-card" style="margin-bottom: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <h2 style="margin: 0; color: white;"><?php echo htmlspecialchars($selectedPatient['patient_name']); ?></h2>
+                                <p style="margin: 4px 0 0 0; opacity: 0.9;">
+                                    <?php echo htmlspecialchars($selectedPatient['patient_code']); ?> ·
+                                    <?php echo htmlspecialchars($selectedPatient['visit_code']); ?> ·
+                                    Age: <?php echo htmlspecialchars($selectedPatient['age'] ?? 'N/A'); ?> ·
+                                    <?php echo htmlspecialchars($selectedPatient['gender'] ?? 'N/A'); ?>
+                                </p>
+                            </div>
+                            <div style="text-align: right;">
+                                <p style="margin: 0; opacity: 0.9;">Ward/Bed</p>
+                                <p style="margin: 4px 0 0 0; font-weight: 600;"><?php echo htmlspecialchars($selectedPatient['ward_name'] ?? 'N/A'); ?> / <?php echo htmlspecialchars($selectedPatient['bed_number'] ?? 'N/A'); ?></p>
+                            </div>
+                        </div>
+                    </div>
+                    <?php endif; ?>
+
+                    <!-- Medical Records History -->
+                    <div class="table-card" style="margin-bottom: 24px;">
+                        <h3 style="margin-bottom: 20px; font-size: 20px; color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px;">
+                            <i class="fas fa-notes-medical" style="color: #3b82f6; margin-right: 8px;"></i> Medical Records History
+                        </h3>
+                        <?php if (empty($medicalRecords)): ?>
+                            <p style="text-align: center; color: #94a3b8; padding: 20px;">No medical records found</p>
+                        <?php else: ?>
+                            <div style="overflow-x: auto;">
+                                <table style="width: 100%; border-collapse: collapse;">
+                                    <thead>
+                                        <tr style="background: #f8fafc;">
+                                            <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Date</th>
+                                            <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Doctor</th>
+                                            <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Diagnosis</th>
+                                            <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Clinical Notes</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($medicalRecords as $record): ?>
+                                        <tr style="border-bottom: 1px solid #e2e8f0;">
+                                            <td style="padding: 12px 16px; color: #64748b;"><?php echo date('M d, Y H:i', strtotime($record['created_at'])); ?></td>
+                                            <td style="padding: 12px 16px; color: #334155;"><?php echo htmlspecialchars($record['doctor_name'] ?? 'N/A'); ?></td>
+                                            <td style="padding: 12px 16px; color: #334155;"><?php echo htmlspecialchars(substr($record['diagnosis'], 0, 100)) . (strlen($record['diagnosis']) > 100 ? '...' : ''); ?></td>
+                                            <td style="padding: 12px 16px; color: #64748b;"><?php echo htmlspecialchars(substr($record['clinical_notes'], 0, 100)) . (strlen($record['clinical_notes']) > 100 ? '...' : ''); ?></td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+
+                    <!-- Lab Orders History -->
+                    <div class="table-card" style="margin-bottom: 24px;">
+                        <h3 style="margin-bottom: 20px; font-size: 20px; color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px;">
+                            <i class="fas fa-flask" style="color: #10b981; margin-right: 8px;"></i> Lab Orders History
+                        </h3>
+                        <?php if (empty($labOrders)): ?>
+                            <p style="text-align: center; color: #94a3b8; padding: 20px;">No lab orders found</p>
+                        <?php else: ?>
+                            <div style="overflow-x: auto;">
+                                <table style="width: 100%; border-collapse: collapse;">
+                                    <thead>
+                                        <tr style="background: #f8fafc;">
+                                            <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Test Name</th>
+                                            <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Category</th>
+                                            <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Status</th>
+                                            <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Ordered Date</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($labOrders as $order): ?>
+                                        <tr style="border-bottom: 1px solid #e2e8f0;">
+                                            <td style="padding: 12px 16px; color: #334155;"><?php echo htmlspecialchars($order['test_name']); ?></td>
+                                            <td style="padding: 12px 16px; color: #64748b;"><?php echo htmlspecialchars($order['test_category']); ?></td>
+                                            <td style="padding: 12px 16px;">
+                                                <span style="padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; 
+                                                    <?php 
+                                                    if ($order['status_name'] === 'Ordered') echo 'background: #fef3c7; color: #92400e;';
+                                                    elseif ($order['status_name'] === 'Sample Collected') echo 'background: #dbeafe; color: #1e40af;';
+                                                    elseif ($order['status_name'] === 'Results Ready') echo 'background: #dcfce7; color: #166534;';
+                                                    else echo 'background: #f1f5f9; color: #64748b;';
+                                                    ?>">
+                                                    <?php echo htmlspecialchars($order['status_name']); ?>
+                                                </span>
+                                            </td>
+                                            <td style="padding: 12px 16px; color: #64748b;"><?php echo date('M d, Y H:i', strtotime($order['created_at'])); ?></td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+
+                    <!-- Prescriptions History -->
+                    <div class="table-card" style="margin-bottom: 24px;">
+                        <h3 style="margin-bottom: 20px; font-size: 20px; color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px;">
+                            <i class="fas fa-pills" style="color: #f59e0b; margin-right: 8px;"></i> Prescriptions History
+                        </h3>
+                        <?php if (empty($prescriptions)): ?>
+                            <p style="text-align: center; color: #94a3b8; padding: 20px;">No prescriptions found</p>
+                        <?php else: ?>
+                            <div style="overflow-x: auto;">
+                                <table style="width: 100%; border-collapse: collapse;">
+                                    <thead>
+                                        <tr style="background: #f8fafc;">
+                                            <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Prescription ID</th>
+                                            <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Doctor</th>
+                                            <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Status</th>
+                                            <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Created Date</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($prescriptions as $prescription): ?>
+                                        <tr style="border-bottom: 1px solid #e2e8f0;">
+                                            <td style="padding: 12px 16px; color: #334155; font-weight: 600;">#<?php echo $prescription['prescription_id']; ?></td>
+                                            <td style="padding: 12px 16px; color: #64748b;"><?php echo htmlspecialchars($prescription['doctor_name'] ?? 'N/A'); ?></td>
+                                            <td style="padding: 12px 16px;">
+                                                <span style="padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; 
+                                                    <?php 
+                                                    if ($prescription['status'] === 'Pending') echo 'background: #fef3c7; color: #92400e;';
+                                                    elseif ($prescription['status'] === 'Dispensed') echo 'background: #dcfce7; color: #166534;';
+                                                    else echo 'background: #f1f5f9; color: #64748b;';
+                                                    ?>">
+                                                    <?php echo htmlspecialchars($prescription['status']); ?>
+                                                </span>
+                                            </td>
+                                            <td style="padding: 12px 16px; color: #64748b;"><?php echo date('M d, Y H:i', strtotime($prescription['created_at'])); ?></td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+
+                    <!-- Checkups History -->
+                    <div class="table-card" style="margin-bottom: 24px;">
+                        <h3 style="margin-bottom: 20px; font-size: 20px; color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px;">
+                            <i class="fas fa-clipboard-user" style="color: #8b5cf6; margin-right: 8px;"></i> Checkups History
+                        </h3>
+                        <?php if (empty($checkups)): ?>
+                            <p style="text-align: center; color: #94a3b8; padding: 20px;">No checkups found</p>
+                        <?php else: ?>
+                            <div style="overflow-x: auto;">
+                                <table style="width: 100%; border-collapse: collapse;">
+                                    <thead>
+                                        <tr style="background: #f8fafc;">
+                                            <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Checkup Time</th>
+                                            <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Recorded By</th>
+                                            <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Progress Notes</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($checkups as $checkup): ?>
+                                        <tr style="border-bottom: 1px solid #e2e8f0;">
+                                            <td style="padding: 12px 16px; color: #64748b;"><?php echo date('M d, Y H:i', strtotime($checkup['checkup_time'])); ?></td>
+                                            <td style="padding: 12px 16px; color: #334155;"><?php echo htmlspecialchars($checkup['recorded_by_name'] ?? 'N/A'); ?></td>
+                                            <td style="padding: 12px 16px; color: #64748b;"><?php echo htmlspecialchars(substr($checkup['progress_notes'], 0, 100)) . (strlen($checkup['progress_notes']) > 100 ? '...' : ''); ?></td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        <?php endif; ?>
                     </div>
                 </div>
             <?php endif; ?>

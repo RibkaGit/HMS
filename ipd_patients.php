@@ -64,7 +64,8 @@ if ($selectedVisitId > 0) {
 $labOrders = [];
 if ($selectedVisitId > 0) {
     // First verify this is an IPD visit by checking bed assignments
-    $ipdCheckQuery = "SELECT ba.*, v.visit_code FROM bed_assignments ba
+    $ipdCheckQuery = "SELECT ba.*, v.visit_code, ba.assigned_at as admission_date
+                      FROM bed_assignments ba
                       JOIN visits v ON ba.visit_id = v.visit_id
                       WHERE ba.visit_id = ? AND ba.discharged_at IS NULL";
     $ipdCheckStmt = $conn->prepare($ipdCheckQuery);
@@ -74,16 +75,21 @@ if ($selectedVisitId > 0) {
         $ipdCheckResult = $ipdCheckStmt->get_result();
         
         if ($ipdCheckResult->num_rows > 0) {
-            // This is an IPD visit, fetch lab orders
+            // This is an IPD visit, get admission date and filter lab orders
+            $ipdVisit = $ipdCheckResult->fetch_assoc();
+            $admissionDate = $ipdVisit['admission_date'];
+            
+            // Only fetch lab orders created on or after IPD admission
+            // Use COALESCE to handle NULL dates - try ordered_at first, then created_at
             $labOrdersQuery = "SELECT lo.*, ltt.name as test_name, ltt.category as test_category, los.name as status_name
                                FROM lab_orders lo
                                JOIN lookup_test_types ltt ON lo.test_type_id = ltt.test_type_id
                                JOIN lookup_order_statuses los ON lo.order_status_id = los.order_status_id
-                               WHERE lo.visit_id = ?
-                               ORDER BY lo.created_at DESC";
+                               WHERE lo.visit_id = ? AND COALESCE(lo.ordered_at, lo.created_at) >= ?
+                               ORDER BY COALESCE(lo.ordered_at, lo.created_at) DESC";
             $labOrdersStmt = $conn->prepare($labOrdersQuery);
             if ($labOrdersStmt) {
-                $labOrdersStmt->bind_param('i', $selectedVisitId);
+                $labOrdersStmt->bind_param('is', $selectedVisitId, $admissionDate);
                 $labOrdersStmt->execute();
                 $labOrders = $labOrdersStmt->get_result()->fetch_all(MYSQLI_ASSOC);
             } else {
@@ -102,7 +108,8 @@ if ($selectedVisitId > 0) {
 $prescriptions = [];
 if ($selectedVisitId > 0) {
     // First verify this is an IPD visit by checking bed assignments
-    $ipdCheckQuery = "SELECT ba.*, v.visit_code FROM bed_assignments ba
+    $ipdCheckQuery = "SELECT ba.*, v.visit_code, ba.assigned_at as admission_date
+                      FROM bed_assignments ba
                       JOIN visits v ON ba.visit_id = v.visit_id
                       WHERE ba.visit_id = ? AND ba.discharged_at IS NULL";
     $ipdCheckStmt = $conn->prepare($ipdCheckQuery);
@@ -112,15 +119,19 @@ if ($selectedVisitId > 0) {
         $ipdCheckResult = $ipdCheckStmt->get_result();
         
         if ($ipdCheckResult->num_rows > 0) {
-            // This is an IPD visit, fetch prescriptions
+            // This is an IPD visit, get admission date and filter prescriptions
+            $ipdVisit = $ipdCheckResult->fetch_assoc();
+            $admissionDate = $ipdVisit['admission_date'];
+            
+            // Only fetch prescriptions created on or after IPD admission
             $prescriptionsQuery = "SELECT p.*, CONCAT(s.first_name, ' ', s.last_name) as doctor_name
                                    FROM prescriptions p
                                    LEFT JOIN staff s ON p.doctor_id = s.staff_id
-                                   WHERE p.visit_id = ?
+                                   WHERE p.visit_id = ? AND p.created_at >= ?
                                    ORDER BY p.created_at DESC";
             $prescriptionsStmt = $conn->prepare($prescriptionsQuery);
             if ($prescriptionsStmt) {
-                $prescriptionsStmt->bind_param('i', $selectedVisitId);
+                $prescriptionsStmt->bind_param('is', $selectedVisitId, $admissionDate);
                 $prescriptionsStmt->execute();
                 $prescriptions = $prescriptionsStmt->get_result()->fetch_all(MYSQLI_ASSOC);
             } else {
@@ -135,29 +146,12 @@ if ($selectedVisitId > 0) {
     }
 }
 
-// Fetch medical records for selected visit (only IPD records)
+// Fetch medical records for selected visit (only IPD visits - verified by bed assignment)
 $medicalRecords = [];
 if ($selectedVisitId > 0) {
-    $medicalRecordsQuery = "SELECT mr.*, CONCAT(s.first_name, ' ', s.last_name) as doctor_name
-                            FROM medical_records mr
-                            LEFT JOIN staff s ON mr.doctor_id = s.staff_id
-                            WHERE mr.visit_id = ? AND mr.record_type = 'IPD'
-                            ORDER BY mr.created_at DESC";
-    $medicalRecordsStmt = $conn->prepare($medicalRecordsQuery);
-    if ($medicalRecordsStmt) {
-        $medicalRecordsStmt->bind_param('i', $selectedVisitId);
-        $medicalRecordsStmt->execute();
-        $medicalRecords = $medicalRecordsStmt->get_result()->fetch_all(MYSQLI_ASSOC);
-    } else {
-        $medicalRecords = [];
-    }
-}
-
-// Fetch checkups for selected visit (only IPD visits - verified by bed assignment)
-$checkups = [];
-if ($selectedVisitId > 0) {
     // First verify this is an IPD visit by checking bed assignments
-    $ipdCheckQuery = "SELECT ba.*, v.visit_code FROM bed_assignments ba
+    $ipdCheckQuery = "SELECT ba.*, v.visit_code, ba.assigned_at as admission_date
+                      FROM bed_assignments ba
                       JOIN visits v ON ba.visit_id = v.visit_id
                       WHERE ba.visit_id = ? AND ba.discharged_at IS NULL";
     $ipdCheckStmt = $conn->prepare($ipdCheckQuery);
@@ -167,15 +161,61 @@ if ($selectedVisitId > 0) {
         $ipdCheckResult = $ipdCheckStmt->get_result();
         
         if ($ipdCheckResult->num_rows > 0) {
-            // This is an IPD visit, fetch checkups
+            // This is an IPD visit, get admission date and filter medical records
+            $ipdVisit = $ipdCheckResult->fetch_assoc();
+            $admissionDate = $ipdVisit['admission_date'];
+            
+            // Only fetch medical records created on or after IPD admission
+            $medicalRecordsQuery = "SELECT mr.*, CONCAT(s.first_name, ' ', s.last_name) as doctor_name
+                                    FROM medical_records mr
+                                    LEFT JOIN staff s ON mr.doctor_id = s.staff_id
+                                    WHERE mr.visit_id = ? AND mr.created_at >= ?
+                                    ORDER BY mr.created_at DESC";
+            $medicalRecordsStmt = $conn->prepare($medicalRecordsQuery);
+            if ($medicalRecordsStmt) {
+                $medicalRecordsStmt->bind_param('is', $selectedVisitId, $admissionDate);
+                $medicalRecordsStmt->execute();
+                $medicalRecords = $medicalRecordsStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+            } else {
+                $medicalRecords = [];
+            }
+        } else {
+            // Not an IPD visit, no medical records
+            $medicalRecords = [];
+        }
+    } else {
+        $medicalRecords = [];
+    }
+}
+
+// Fetch checkups for selected visit (only IPD visits - verified by bed assignment)
+$checkups = [];
+if ($selectedVisitId > 0) {
+    // First verify this is an IPD visit by checking bed assignments
+    $ipdCheckQuery = "SELECT ba.*, v.visit_code, ba.assigned_at as admission_date
+                      FROM bed_assignments ba
+                      JOIN visits v ON ba.visit_id = v.visit_id
+                      WHERE ba.visit_id = ? AND ba.discharged_at IS NULL";
+    $ipdCheckStmt = $conn->prepare($ipdCheckQuery);
+    if ($ipdCheckStmt) {
+        $ipdCheckStmt->bind_param('i', $selectedVisitId);
+        $ipdCheckStmt->execute();
+        $ipdCheckResult = $ipdCheckStmt->get_result();
+        
+        if ($ipdCheckResult->num_rows > 0) {
+            // This is an IPD visit, get admission date and filter checkups
+            $ipdVisit = $ipdCheckResult->fetch_assoc();
+            $admissionDate = $ipdVisit['admission_date'];
+            
+            // Only fetch checkups created on or after IPD admission
             $checkupsQuery = "SELECT ic.*, CONCAT(s.first_name, ' ', s.last_name) as recorded_by_name
                               FROM ipd_checkups ic
                               LEFT JOIN staff s ON ic.recorded_by = s.staff_id
-                              WHERE ic.visit_id = ?
+                              WHERE ic.visit_id = ? AND ic.checkup_time >= ?
                               ORDER BY ic.checkup_time DESC";
             $checkupsStmt = $conn->prepare($checkupsQuery);
             if ($checkupsStmt) {
-                $checkupsStmt->bind_param('i', $selectedVisitId);
+                $checkupsStmt->bind_param('is', $selectedVisitId, $admissionDate);
                 $checkupsStmt->execute();
                 $checkups = $checkupsStmt->get_result()->fetch_all(MYSQLI_ASSOC);
             } else {
@@ -203,8 +243,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $needsRadiology = isset($_POST['needs_radiology']) ? 1 : 0;
     $needsPharmacy = isset($_POST['needs_pharmacy']) ? 1 : 0;
 
-    $query = "INSERT INTO medical_records (visit_id, patient_id, doctor_id, diagnosis, clinical_notes, needs_lab, needs_radiology, needs_pharmacy, record_type)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'IPD')";
+    // Validate doctor_id exists in staff table, if not use current user
+    $doctorCheckQuery = "SELECT staff_id FROM staff WHERE staff_id = ?";
+    $doctorCheckStmt = $conn->prepare($doctorCheckQuery);
+    if ($doctorCheckStmt) {
+        $doctorCheckStmt->bind_param('i', $doctorId);
+        $doctorCheckStmt->execute();
+        if ($doctorCheckStmt->get_result()->num_rows === 0) {
+            // Doctor not found, use current user
+            $doctorId = intval($_SESSION['user_id']);
+        }
+    }
+
+    $query = "INSERT INTO medical_records (visit_id, patient_id, doctor_id, diagnosis, clinical_notes, needs_lab, needs_radiology, needs_pharmacy)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
     $stmt = $conn->prepare($query);
     if (!$stmt) {
         $error = 'Failed to prepare medical record query: ' . $conn->error;
@@ -227,7 +279,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             header('Location: ipd_patients.php?visit_id=' . $visitId . '&tab=medical-records&message=' . urlencode($message));
             exit();
         } else {
-            $error = 'Failed to create IPD medical record. Please try again.';
+            $error = 'Failed to create IPD medical record: ' . $stmt->error;
         }
     }
 }
@@ -279,6 +331,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         exit();
     } else {
         $error = 'Select at least one lab test and try again.';
+    }
+}
+
+// ============================================================================
+// COLLECT SAMPLE FOR LAB ORDER
+// ============================================================================
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'collect_sample') {
+    $labOrderId = intval($_POST['lab_order_id']);
+    
+    // Get the "Sample Collected" status ID
+    $sampleCollectedStatusId = getLookupId($conn, 'lookup_order_statuses', 'name', 'Sample Collected');
+    
+    $updateQuery = "UPDATE lab_orders SET order_status_id = ? WHERE lab_order_id = ?";
+    $updateStmt = $conn->prepare($updateQuery);
+    $updateStmt->bind_param('ii', $sampleCollectedStatusId, $labOrderId);
+    
+    if ($updateStmt->execute()) {
+        logUserActivity($conn, $_SESSION['user_id'], 'Collected Lab Sample', "Collected sample for lab order ID: {$labOrderId}");
+        $message = 'Sample collected successfully!';
+        header('Location: ipd_patients.php?tab=lab-management&message=' . urlencode($message));
+        exit();
+    } else {
+        $error = 'Failed to collect sample. Please try again.';
+    }
+}
+
+// ============================================================================
+// ADD RESULT FOR LAB ORDER
+// ============================================================================
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add_result') {
+    $labOrderId = intval($_POST['lab_order_id']);
+    
+    // Get the "Results Ready" status ID
+    $resultsReadyStatusId = getLookupId($conn, 'lookup_order_statuses', 'name', 'Results Ready');
+    
+    $updateQuery = "UPDATE lab_orders SET order_status_id = ? WHERE lab_order_id = ?";
+    $updateStmt = $conn->prepare($updateQuery);
+    $updateStmt->bind_param('ii', $resultsReadyStatusId, $labOrderId);
+    
+    if ($updateStmt->execute()) {
+        logUserActivity($conn, $_SESSION['user_id'], 'Added Lab Result', "Added result for lab order ID: {$labOrderId}");
+        $message = 'Result added successfully!';
+        header('Location: ipd_patients.php?tab=lab-management&message=' . urlencode($message));
+        exit();
+    } else {
+        $error = 'Failed to add result. Please try again.';
     }
 }
 
@@ -755,6 +853,9 @@ if (isset($_GET['message'])) {
                     <a href="ipd_patients.php?tab=lab-management" class="tab <?php echo $activeTab === 'lab-management' ? 'active' : ''; ?>" id="tab-lab-management">
                         <i class="fas fa-flask"></i> Lab Management
                     </a>
+                    <a href="ipd_patients.php?tab=pharmacy-management" class="tab <?php echo $activeTab === 'pharmacy-management' ? 'active' : ''; ?>" id="tab-pharmacy-management">
+                        <i class="fas fa-pills"></i> Pharmacy Management
+                    </a>
                 </div>
 
                 <?php if ($activeTab === 'patients' || $activeTab === 'overview'): ?>
@@ -830,9 +931,27 @@ if (isset($_GET['message'])) {
                 <!-- Lab Management Tab - All IPD Lab Orders -->
                 <div class="table-card">
                     <h2 style="margin-bottom: 20px;">IPD Lab Orders Management</h2>
+                    
+                    <!-- Status Filter -->
+                    <div style="margin-bottom: 20px; display: flex; gap: 10px; flex-wrap: wrap;">
+                        <a href="ipd_patients.php?tab=lab-management" class="tab <?php echo !isset($_GET['status']) ? 'active' : ''; ?>" style="padding: 8px 16px; background: #e2e8f0; border-radius: 6px; text-decoration: none; color: #475569; font-size: 14px;">
+                            All
+                        </a>
+                        <a href="ipd_patients.php?tab=lab-management&status=Ordered" class="tab <?php echo isset($_GET['status']) && $_GET['status'] === 'Ordered' ? 'active' : ''; ?>" style="padding: 8px 16px; background: #fef3c7; border-radius: 6px; text-decoration: none; color: #92400e; font-size: 14px;">
+                            Awaiting Sample
+                        </a>
+                        <a href="ipd_patients.php?tab=lab-management&status=Sample Collected" class="tab <?php echo isset($_GET['status']) && $_GET['status'] === 'Sample Collected' ? 'active' : ''; ?>" style="padding: 8px 16px; background: #dbeafe; border-radius: 6px; text-decoration: none; color: #1e40af; font-size: 14px;">
+                            Sample Collected
+                        </a>
+                        <a href="ipd_patients.php?tab=lab-management&status=Results Ready" class="tab <?php echo isset($_GET['status']) && $_GET['status'] === 'Results Ready' ? 'active' : ''; ?>" style="padding: 8px 16px; background: #dcfce7; border-radius: 6px; text-decoration: none; color: #166534; font-size: 14px;">
+                            Results Ready
+                        </a>
+                    </div>
+                    
                     <?php
-                    // Fetch all IPD lab orders
-                    $allIpdlabOrdersQuery = "SELECT lo.*, ltt.name as test_name, ltt.category as test_category, los.name as status_name,
+                    // Fetch all IPD lab orders with optional status filter
+                    $statusFilter = isset($_GET['status']) ? sanitizeInput($_GET['status']) : '';
+                    $allIpdlabOrdersQuery = "SELECT lo.*, ltt.name as test_name, ltt.category as test_category, los.name as status_name, los.lookup_order_status_id as status_id,
                                              v.visit_code, CONCAT(p.first_name, ' ', p.last_name) as patient_name, p.patient_code,
                                              b.bed_number, w.name as ward_name
                                             FROM lab_orders lo
@@ -843,8 +962,11 @@ if (isset($_GET['message'])) {
                                             JOIN bed_assignments ba ON v.visit_id = ba.visit_id
                                             JOIN beds b ON ba.bed_id = b.bed_id
                                             JOIN wards w ON b.ward_id = w.ward_id
-                                            WHERE ba.discharged_at IS NULL
-                                            ORDER BY lo.created_at DESC";
+                                            WHERE ba.discharged_at IS NULL";
+                    if ($statusFilter) {
+                        $allIpdlabOrdersQuery .= " AND los.name = '" . $conn->real_escape_string($statusFilter) . "'";
+                    }
+                    $allIpdlabOrdersQuery .= " ORDER BY lo.created_at DESC";
                     $allIpdlabOrdersResult = $conn->query($allIpdlabOrdersQuery);
                     $allIpdlabOrders = [];
                     if ($allIpdlabOrdersResult) {
@@ -893,7 +1015,105 @@ if (isset($_GET['message'])) {
                                         </td>
                                         <td style="padding: 12px 16px; color: #64748b;"><?php echo date('M d, Y H:i', strtotime($order['created_at'] ?? 'now')); ?></td>
                                         <td style="padding: 12px 16px;">
-                                            <a href="ipd_patients.php?visit_id=<?php echo $order['visit_id']; ?>&tab=lab" style="padding: 6px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer; text-decoration: none; display: inline-block;">
+                                            <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                                                <?php if ($order['status_name'] === 'Ordered'): ?>
+                                                    <form method="POST" action="" style="display: inline;">
+                                                        <input type="hidden" name="action" value="collect_sample">
+                                                        <input type="hidden" name="lab_order_id" value="<?php echo $order['lab_order_id']; ?>">
+                                                        <button type="submit" onclick="return confirm('Mark sample as collected?')" style="padding: 6px 12px; background: #10b981; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer;">
+                                                            <i class="fas fa-vial"></i> Collect Sample
+                                                        </button>
+                                                    </form>
+                                                <?php endif; ?>
+                                                <?php if ($order['status_name'] === 'Sample Collected'): ?>
+                                                    <form method="POST" action="" style="display: inline;">
+                                                        <input type="hidden" name="action" value="add_result">
+                                                        <input type="hidden" name="lab_order_id" value="<?php echo $order['lab_order_id']; ?>">
+                                                        <button type="submit" style="padding: 6px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer;">
+                                                            <i class="fas fa-file-medical"></i> Add Result
+                                                        </button>
+                                                    </form>
+                                                <?php endif; ?>
+                                                <a href="ipd_patients.php?visit_id=<?php echo $order['visit_id']; ?>&tab=lab" style="padding: 6px 12px; background: #64748b; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer; text-decoration: none; display: inline-block;">
+                                                    <i class="fas fa-eye"></i> View
+                                                </a>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    <?php endif; ?>
+                </div>
+                <?php endif; ?>
+
+                <?php if ($activeTab === 'pharmacy-management'): ?>
+                <!-- Pharmacy Management Tab - All IPD Prescriptions -->
+                <div class="table-card">
+                    <h2 style="margin-bottom: 20px;">IPD Prescriptions Management</h2>
+                    <?php
+                    // Fetch all IPD prescriptions
+                    $allIpdPrescriptionsQuery = "SELECT p.*, CONCAT(s.first_name, ' ', s.last_name) as doctor_name,
+                                                  v.visit_code, CONCAT(pat.first_name, ' ', pat.last_name) as patient_name, pat.patient_code,
+                                                  b.bed_number, w.name as ward_name
+                                                 FROM prescriptions p
+                                                 LEFT JOIN staff s ON p.doctor_id = s.staff_id
+                                                 JOIN visits v ON p.visit_id = v.visit_id
+                                                 JOIN patients pat ON v.patient_id = pat.patient_id
+                                                 JOIN bed_assignments ba ON v.visit_id = ba.visit_id
+                                                 JOIN beds b ON ba.bed_id = b.bed_id
+                                                 JOIN wards w ON b.ward_id = w.ward_id
+                                                 WHERE ba.discharged_at IS NULL
+                                                 ORDER BY p.created_at DESC";
+                    $allIpdPrescriptionsResult = $conn->query($allIpdPrescriptionsQuery);
+                    $allIpdPrescriptions = [];
+                    if ($allIpdPrescriptionsResult) {
+                        $allIpdPrescriptions = $allIpdPrescriptionsResult->fetch_all(MYSQLI_ASSOC);
+                    }
+                    ?>
+                    <?php if (empty($allIpdPrescriptions)): ?>
+                        <p style="text-align: center; color: #94a3b8; padding: 40px;">
+                            <i class="fas fa-pills" style="font-size: 32px; display: block; margin-bottom: 8px;"></i>
+                            No IPD prescriptions found
+                        </p>
+                    <?php else: ?>
+                        <div style="overflow-x: auto;">
+                            <table style="width: 100%; border-collapse: collapse;">
+                                <thead>
+                                    <tr style="background: #f8fafc;">
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Prescription ID</th>
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Patient</th>
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Ward/Bed</th>
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Doctor</th>
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Status</th>
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Created Date</th>
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($allIpdPrescriptions as $prescription): ?>
+                                    <tr style="border-bottom: 1px solid #e2e8f0;">
+                                        <td style="padding: 12px 16px; color: #334155; font-weight: 600;">#<?php echo $prescription['prescription_id']; ?></td>
+                                        <td style="padding: 12px 16px; color: #334155;">
+                                            <strong><?php echo htmlspecialchars($prescription['patient_name']); ?></strong><br>
+                                            <small style="color: #64748b;"><?php echo htmlspecialchars($prescription['patient_code']); ?></small>
+                                        </td>
+                                        <td style="padding: 12px 16px; color: #64748b;"><?php echo htmlspecialchars($prescription['ward_name']); ?> / <?php echo htmlspecialchars($prescription['bed_number']); ?></td>
+                                        <td style="padding: 12px 16px; color: #64748b;"><?php echo htmlspecialchars($prescription['doctor_name'] ?? 'N/A'); ?></td>
+                                        <td style="padding: 12px 16px;">
+                                            <span style="padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; 
+                                                <?php 
+                                                if ($prescription['status'] === 'Pending') echo 'background: #fef3c7; color: #92400e;';
+                                                elseif ($prescription['status'] === 'Dispensed') echo 'background: #dcfce7; color: #166534;';
+                                                else echo 'background: #f1f5f9; color: #64748b;';
+                                                ?>">
+                                                <?php echo htmlspecialchars($prescription['status']); ?>
+                                            </span>
+                                        </td>
+                                        <td style="padding: 12px 16px; color: #64748b;"><?php echo date('M d, Y H:i', strtotime($prescription['created_at'] ?? 'now')); ?></td>
+                                        <td style="padding: 12px 16px;">
+                                            <a href="ipd_patients.php?visit_id=<?php echo $prescription['visit_id']; ?>&tab=pharmacy" style="padding: 6px 12px; background: #f59e0b; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer; text-decoration: none; display: inline-block;">
                                                 <i class="fas fa-eye"></i> View
                                             </a>
                                         </td>

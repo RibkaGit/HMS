@@ -23,26 +23,31 @@ $activeTab = isset($_GET['tab']) ? $_GET['tab'] : 'overview';
 $selectedVisitId = isset($_GET['visit_id']) ? intval($_GET['visit_id']) : 0;
 
 // ============================================================================
-// GET IPD PATIENTS
+// GET IPD PATIENTS (from bed_assignments)
 // ============================================================================
-$ipdPatientsQuery = "SELECT ir.ipd_record_id, ir.visit_id, ir.patient_id, ir.bed_id, ir.ward_id, ir.status,
-                     ir.admission_date, ir.primary_diagnosis, ir.admission_notes,
+$ipdPatientsQuery = "SELECT ba.assignment_id as ipd_record_id, ba.visit_id, v.patient_id, ba.bed_id, b.ward_id, 'Admitted' as status,
+                     ba.assigned_at as admission_date, '' as primary_diagnosis, '' as admission_notes,
                      v.visit_code, v.admitted_at,
                      CONCAT(p.first_name, ' ', p.last_name) as patient_name,
-                     p.patient_code, p.gender, p.date_of_birth,
+                     p.patient_code, p.date_of_birth,
                      b.bed_number,
                      w.name as ward_name,
                      CONCAT(d.first_name, ' ', d.last_name) as attending_doctor
-              FROM ipd_records ir
-              JOIN visits v ON ir.visit_id = v.visit_id
-              JOIN patients p ON ir.patient_id = p.patient_id
-              LEFT JOIN beds b ON ir.bed_id = b.bed_id
-              LEFT JOIN wards w ON ir.ward_id = w.ward_id
-              LEFT JOIN staff d ON ir.attending_doctor_id = d.staff_id
-              WHERE ir.status = 'Admitted'
-              ORDER BY ir.admission_date DESC";
+              FROM bed_assignments ba
+              JOIN visits v ON ba.visit_id = v.visit_id
+              JOIN patients p ON v.patient_id = p.patient_id
+              JOIN beds b ON ba.bed_id = b.bed_id
+              JOIN wards w ON b.ward_id = w.ward_id
+              LEFT JOIN staff d ON v.attending_doctor_id = d.staff_id
+              WHERE ba.discharged_at IS NULL
+              ORDER BY ba.assigned_at DESC";
 $ipdPatientsResult = $conn->query($ipdPatientsQuery);
-$ipdPatients = $ipdPatientsResult ? $ipdPatientsResult->fetch_all(MYSQLI_ASSOC) : [];
+$ipdPatients = [];
+if ($ipdPatientsResult) {
+    $ipdPatients = $ipdPatientsResult->fetch_all(MYSQLI_ASSOC);
+} else {
+    $error = "Database query failed: " . $conn->error;
+}
 
 // Get selected patient details
 $selectedPatient = null;
@@ -313,12 +318,14 @@ if ($selectedVisitId > 0) {
     $mrQuery = "SELECT mr.*, CONCAT(d.first_name, ' ', d.last_name) as doctor_name
                 FROM medical_records mr
                 LEFT JOIN staff d ON mr.doctor_id = d.staff_id
-                WHERE mr.visit_id = ? AND mr.record_type = 'IPD'
+                WHERE mr.visit_id = ?
                 ORDER BY mr.created_at DESC";
     $mrStmt = $conn->prepare($mrQuery);
-    $mrStmt->bind_param('i', $selectedVisitId);
-    $mrStmt->execute();
-    $ipdMedicalRecords = $mrStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    if ($mrStmt) {
+        $mrStmt->bind_param('i', $selectedVisitId);
+        $mrStmt->execute();
+        $ipdMedicalRecords = $mrStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    }
 }
 
 // Get lab orders for selected patient
@@ -331,9 +338,11 @@ if ($selectedVisitId > 0) {
                  WHERE lo.visit_id = ? AND vt.category = 'Laboratory'
                  ORDER BY lo.ordered_at DESC";
     $labStmt = $conn->prepare($labQuery);
-    $labStmt->bind_param('i', $selectedVisitId);
-    $labStmt->execute();
-    $labOrders = $labStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    if ($labStmt) {
+        $labStmt->bind_param('i', $selectedVisitId);
+        $labStmt->execute();
+        $labOrders = $labStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    }
 }
 
 // Get prescriptions for selected patient
@@ -345,9 +354,11 @@ if ($selectedVisitId > 0) {
                WHERE pr.visit_id = ?
                ORDER BY pr.created_at DESC";
     $rxStmt = $conn->prepare($rxQuery);
-    $rxStmt->bind_param('i', $selectedVisitId);
-    $rxStmt->execute();
-    $prescriptions = $rxStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    if ($rxStmt) {
+        $rxStmt->bind_param('i', $selectedVisitId);
+        $rxStmt->execute();
+        $prescriptions = $rxStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    }
 }
 
 // Get checkups for selected patient
@@ -359,9 +370,11 @@ if ($selectedVisitId > 0) {
                      WHERE ic.visit_id = ?
                      ORDER BY ic.checkup_time DESC";
     $checkupStmt = $conn->prepare($checkupQuery);
-    $checkupStmt->bind_param('i', $selectedVisitId);
-    $checkupStmt->execute();
-    $checkups = $checkupStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    if ($checkupStmt) {
+        $checkupStmt->bind_param('i', $selectedVisitId);
+        $checkupStmt->execute();
+        $checkups = $checkupStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    }
 }
 
 if (isset($_GET['message'])) {
@@ -381,72 +394,75 @@ if (isset($_GET['message'])) {
         .patient-card {
             background: #fff;
             border: 1px solid #e2e8f0;
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 16px;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 12px;
             transition: all 0.3s;
         }
         .patient-card:hover {
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
             border-color: #8b5cf6;
         }
         .patient-header {
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            margin-bottom: 12px;
+            margin-bottom: 8px;
         }
         .patient-info {
             display: flex;
-            gap: 12px;
+            gap: 10px;
             align-items: center;
         }
         .patient-avatar {
-            width: 48px;
-            height: 48px;
+            width: 36px;
+            height: 36px;
             border-radius: 50%;
             background: #8b5cf6;
             color: white;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 18px;
+            font-size: 14px;
             font-weight: 600;
         }
         .patient-details h4 {
-            margin: 0 0 4px 0;
+            margin: 0 0 2px 0;
             color: #0f172a;
+            font-size: 14px;
         }
         .patient-details p {
             margin: 0;
             color: #64748b;
-            font-size: 13px;
+            font-size: 12px;
         }
         .patient-actions {
             display: flex;
-            gap: 8px;
+            gap: 6px;
+            flex-wrap: wrap;
         }
         .patient-actions a {
-            padding: 6px 12px;
-            border-radius: 6px;
-            font-size: 12px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
             text-decoration: none;
             color: white;
         }
         .patient-meta {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 12px;
-            margin-top: 12px;
-            padding-top: 12px;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-top: 8px;
+            padding-top: 8px;
             border-top: 1px solid #f1f5f9;
         }
         .meta-item {
-            font-size: 13px;
+            font-size: 11px;
         }
         .meta-label {
             color: #64748b;
             display: block;
+            font-size: 10px;
         }
         .meta-value {
             color: #0f172a;
@@ -603,10 +619,6 @@ if (isset($_GET['message'])) {
                                 <div class="meta-item">
                                     <span class="meta-label">Admitted</span>
                                     <span class="meta-value"><?php echo date('M d, Y', strtotime($patient['admission_date'])); ?></span>
-                                </div>
-                                <div class="meta-item">
-                                    <span class="meta-label">Gender</span>
-                                    <span class="meta-value"><?php echo htmlspecialchars($patient['gender'] ?? 'N/A'); ?></span>
                                 </div>
                                 <div class="meta-item">
                                     <span class="meta-label">Age</span>

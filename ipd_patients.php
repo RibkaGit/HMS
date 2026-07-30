@@ -68,7 +68,7 @@ if ($selectedVisitId > 0) {
                        JOIN lookup_test_types ltt ON lo.test_type_id = ltt.test_type_id
                        JOIN lookup_order_statuses los ON lo.order_status_id = los.order_status_id
                        WHERE lo.visit_id = ?
-                       ORDER BY lo.created_at DESC";
+                       ORDER BY lo.ordered_at DESC";
     $labOrdersStmt = $conn->prepare($labOrdersQuery);
     if ($labOrdersStmt) {
         $labOrdersStmt->bind_param('i', $selectedVisitId);
@@ -97,13 +97,13 @@ if ($selectedVisitId > 0) {
     }
 }
 
-// Fetch medical records for selected visit
+// Fetch medical records for selected visit (only IPD records)
 $medicalRecords = [];
 if ($selectedVisitId > 0) {
     $medicalRecordsQuery = "SELECT mr.*, CONCAT(s.first_name, ' ', s.last_name) as doctor_name
                             FROM medical_records mr
                             LEFT JOIN staff s ON mr.doctor_id = s.staff_id
-                            WHERE mr.visit_id = ?
+                            WHERE mr.visit_id = ? AND mr.record_type = 'IPD'
                             ORDER BY mr.created_at DESC";
     $medicalRecordsStmt = $conn->prepare($medicalRecordsQuery);
     if ($medicalRecordsStmt) {
@@ -831,6 +831,40 @@ if (isset($_GET['message'])) {
                             </div>
                         </form>
                     </div>
+
+                    <?php if (!empty($medicalRecords)): ?>
+                    <div class="table-card" style="margin-top: 24px;">
+                        <h3 style="margin-bottom: 20px; font-size: 20px; color: #1e293b;">IPD Medical Records History</h3>
+                        <div style="overflow-x: auto;">
+                            <table style="width: 100%; border-collapse: collapse;">
+                                <thead>
+                                    <tr style="background: #f8fafc;">
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Date</th>
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Doctor</th>
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Diagnosis</th>
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Clinical Notes</th>
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($medicalRecords as $record): ?>
+                                    <tr style="border-bottom: 1px solid #e2e8f0;">
+                                        <td style="padding: 12px 16px; color: #64748b;"><?php echo date('M d, Y H:i', strtotime($record['created_at'])); ?></td>
+                                        <td style="padding: 12px 16px; color: #334155;"><?php echo htmlspecialchars($record['doctor_name'] ?? 'N/A'); ?></td>
+                                        <td style="padding: 12px 16px; color: #334155;"><?php echo htmlspecialchars(substr($record['diagnosis'], 0, 100)) . (strlen($record['diagnosis']) > 100 ? '...' : ''); ?></td>
+                                        <td style="padding: 12px 16px; color: #64748b;"><?php echo htmlspecialchars(substr($record['clinical_notes'], 0, 100)) . (strlen($record['clinical_notes']) > 100 ? '...' : ''); ?></td>
+                                        <td style="padding: 12px 16px;">
+                                            <button type="button" onclick="editMedicalRecord(<?php echo $record['record_id']; ?>)" style="padding: 6px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer; transition: all 0.2s;">
+                                                <i class="fas fa-edit"></i> Edit
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <?php endif; ?>
                 </div>
 
                 <!-- Lab Tab Content -->
@@ -1266,7 +1300,7 @@ if (isset($_GET['message'])) {
                                                     <?php echo htmlspecialchars($order['status_name']); ?>
                                                 </span>
                                             </td>
-                                            <td style="padding: 12px 16px; color: #64748b;"><?php echo date('M d, Y H:i', strtotime($order['created_at'])); ?></td>
+                                            <td style="padding: 12px 16px; color: #64748b;"><?php echo date('M d, Y H:i', strtotime($order['ordered_at'] ?? $order['created_at'] ?? 'now')); ?></td>
                                         </tr>
                                         <?php endforeach; ?>
                                     </tbody>

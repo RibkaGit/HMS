@@ -324,7 +324,7 @@ if (isset($_GET['message'])) {
                 </div>
             <?php else: ?>
                 <div style="margin-bottom: 20px;">
-                    <a href="ipd_checkups.php" class="btn-cancel" style="display: inline-flex; align-items: center; gap: 8px;">
+                    <a href="ipd_patients.php" class="btn-cancel" style="display: inline-flex; align-items: center; gap: 8px;">
                         <i class="fas fa-arrow-left"></i> Back to IPD Patients
                     </a>
                 </div>
@@ -335,9 +335,9 @@ if (isset($_GET['message'])) {
                         <div>
                             <h2 style="margin: 0; color: white;"><?php echo htmlspecialchars($selectedPatient['patient_name']); ?></h2>
                             <p style="margin: 4px 0 0 0; opacity: 0.9;">
-                                <?php echo htmlspecialchars($selectedPatient['patient_code']); ?> · 
-                                <?php echo htmlspecialchars($selectedPatient['visit_code']); ?> · 
-                                <?php echo htmlspecialchars($selectedPatient['ward_name'] . ' / Bed ' . $selectedPatient['bed_number']); ?>
+                                <?php echo htmlspecialchars($selectedPatient['patient_code']); ?> ·
+                                <?php echo htmlspecialchars($selectedPatient['visit_code']); ?> ·
+                                <?php echo htmlspecialchars($selectedPatient['ward_name'] ?? 'N/A'); ?> / Bed <?php echo htmlspecialchars($selectedPatient['bed_number'] ?? 'N/A'); ?>
                             </p>
                         </div>
                         <div style="text-align: right;">

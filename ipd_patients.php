@@ -453,6 +453,44 @@ if (isset($_GET['message'])) {
         .patient-actions a:hover {
             opacity: 0.9;
         }
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        .tabs .tab {
+            padding: 12px 20px;
+            background: #f8fafc;
+            border: none;
+            border-radius: 8px 8px 0 0;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            color: #64748b;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s;
+        }
+        .tabs .tab:hover {
+            background: #e2e8f0;
+            color: #0f172a;
+        }
+        .tabs .tab.active {
+            background: #8b5cf6;
+            color: white;
+        }
+        .tabs .tab i {
+            font-size: 16px;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
         .patient-meta {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
@@ -595,16 +633,16 @@ if (isset($_GET['message'])) {
                                     </div>
                                 </div>
                                 <div class="patient-actions">
-                                    <a href="ipd_patients.php?tab=medical_records&visit_id=<?php echo $patient['visit_id']; ?>" style="background: #3b82f6;">
+                                    <a href="medical_records.php?visit_id=<?php echo $patient['visit_id']; ?>" style="background: #3b82f6;">
                                         <i class="fas fa-notes-medical"></i> Records
                                     </a>
-                                    <a href="ipd_patients.php?tab=lab&visit_id=<?php echo $patient['visit_id']; ?>" style="background: #10b981;">
+                                    <a href="lab.php?visit_id=<?php echo $patient['visit_id']; ?>" style="background: #10b981;">
                                         <i class="fas fa-flask"></i> Lab
                                     </a>
-                                    <a href="ipd_patients.php?tab=pharmacy&visit_id=<?php echo $patient['visit_id']; ?>" style="background: #f59e0b;">
+                                    <a href="pharmacy.php?visit_id=<?php echo $patient['visit_id']; ?>" style="background: #f59e0b;">
                                         <i class="fas fa-pills"></i> Pharmacy
                                     </a>
-                                    <a href="ipd_patients.php?tab=checkups&visit_id=<?php echo $patient['visit_id']; ?>" style="background: #8b5cf6;">
+                                    <a href="ipd_checkups.php?visit_id=<?php echo $patient['visit_id']; ?>" style="background: #8b5cf6;">
                                         <i class="fas fa-clipboard-user"></i> Checkups
                                     </a>
                                     <a href="ipd_patients.php?action=discharge&ipd_record_id=<?php echo $patient['ipd_record_id']; ?>" style="background: #ef4444;" onclick="return confirm('Are you sure you want to discharge this patient?');">
@@ -667,22 +705,24 @@ if (isset($_GET['message'])) {
 
                 <!-- Patient Tabs -->
                 <div class="tabs">
-                    <button class="tab <?php echo $activeTab === 'medical_records' ? 'active' : ''; ?>" data-tab="medical_records">
+                    <a href="medical_records.php?visit_id=<?php echo $selectedVisitId; ?>" class="tab">
                         <i class="fas fa-notes-medical"></i> Medical Records
-                    </button>
-                    <button class="tab <?php echo $activeTab === 'lab' ? 'active' : ''; ?>" data-tab="lab">
+                    </a>
+                    <a href="lab.php?visit_id=<?php echo $selectedVisitId; ?>" class="tab">
                         <i class="fas fa-flask"></i> Lab
-                    </button>
-                    <button class="tab <?php echo $activeTab === 'pharmacy' ? 'active' : ''; ?>" data-tab="pharmacy">
+                    </a>
+                    <a href="pharmacy.php?visit_id=<?php echo $selectedVisitId; ?>" class="tab">
                         <i class="fas fa-pills"></i> Pharmacy
-                    </button>
-                    <button class="tab <?php echo $activeTab === 'checkups' ? 'active' : ''; ?>" data-tab="checkups">
+                    </a>
+                    <a href="ipd_checkups.php?visit_id=<?php echo $selectedVisitId; ?>" class="tab">
                         <i class="fas fa-clipboard-user"></i> Checkups
-                    </button>
+                    </a>
                 </div>
 
-                <!-- Medical Records Tab -->
-                <div class="tab-content <?php echo $activeTab === 'medical_records' ? 'active' : ''; ?>" id="tab-medical_records">
+                <div class="table-card" style="text-align: center; padding: 40px;">
+                    <i class="fas fa-arrow-up" style="font-size: 32px; color: #64748b; margin-bottom: 16px;"></i>
+                    <p style="color: #64748b; font-size: 16px;">Click on a tab above to view patient details</p>
+                </div>
                     <div class="table-card">
                         <h2 style="margin-bottom: 20px;">Create IPD Medical Record</h2>
                         <form method="POST" action="">
@@ -1086,19 +1126,6 @@ if (isset($_GET['message'])) {
     </div>
 
     <script>
-        // Tab switching functionality
-        document.addEventListener('DOMContentLoaded', function() {
-            const tabs = document.querySelectorAll('.tab');
-            tabs.forEach(tab => {
-                tab.addEventListener('click', function() {
-                    const tabName = this.getAttribute('data-tab');
-                    const url = new URL(window.location);
-                    url.searchParams.set('tab', tabName);
-                    window.location.href = url.toString();
-                });
-            });
-        });
-
         let medicationCount = 0;
         let checkupMedicationCount = 0;
 

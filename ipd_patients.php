@@ -80,13 +80,13 @@ if ($selectedVisitId > 0) {
             $admissionDate = $ipdVisit['admission_date'];
             
             // Only fetch lab orders created on or after IPD admission
-            // Use COALESCE to handle NULL dates - try ordered_at first, then created_at
+            // Use the bed assignment date as the filter
             $labOrdersQuery = "SELECT lo.*, ltt.name as test_name, ltt.category as test_category, los.name as status_name
                                FROM lab_orders lo
                                JOIN lookup_test_types ltt ON lo.test_type_id = ltt.test_type_id
                                JOIN lookup_order_statuses los ON lo.order_status_id = los.order_status_id
-                               WHERE lo.visit_id = ? AND COALESCE(lo.ordered_at, lo.created_at) >= ?
-                               ORDER BY COALESCE(lo.ordered_at, lo.created_at) DESC";
+                               WHERE lo.visit_id = ? AND lo.created_at >= ?
+                               ORDER BY lo.created_at DESC";
             $labOrdersStmt = $conn->prepare($labOrdersQuery);
             if ($labOrdersStmt) {
                 $labOrdersStmt->bind_param('is', $selectedVisitId, $admissionDate);
@@ -280,6 +280,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             exit();
         } else {
             $error = 'Failed to create IPD medical record: ' . $stmt->error;
+        }
+    }
+}
+
+// ============================================================================
+// UPDATE IPD MEDICAL RECORD
+// ============================================================================
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_ipd_record') {
+    $recordId = intval($_POST['record_id']);
+    $visitId = intval($_POST['visit_id']);
+    $patientId = intval($_POST['patient_id']);
+    $doctorId = intval($_POST['doctor_id']);
+    $diagnosis = sanitizeInput($_POST['diagnosis'] ?? '');
+    $clinicalNotes = sanitizeInput($_POST['clinical_notes'] ?? '');
+
+    // Validate doctor_id exists in staff table, if not use current user
+    $doctorCheckQuery = "SELECT staff_id FROM staff WHERE staff_id = ?";
+    $doctorCheckStmt = $conn->prepare($doctorCheckQuery);
+    if ($doctorCheckStmt) {
+        $doctorCheckStmt->bind_param('i', $doctorId);
+        $doctorCheckStmt->execute();
+        if ($doctorCheckStmt->get_result()->num_rows === 0) {
+            // Doctor not found, use current user
+            $doctorId = intval($_SESSION['user_id']);
+        }
+    }
+
+    $query = "UPDATE medical_records SET diagnosis = ?, clinical_notes = ?, doctor_id = ? WHERE record_id = ?";
+    $stmt = $conn->prepare($query);
+    if (!$stmt) {
+        $error = 'Failed to prepare medical record update query: ' . $conn->error;
+    } else {
+        $stmt->bind_param('siii', $diagnosis, $clinicalNotes, $doctorId, $recordId);
+
+        if ($stmt->execute()) {
+            logUserActivity($conn, $_SESSION['user_id'], 'Updated IPD Medical Record', "Updated IPD medical record ID: {$recordId} for visit ID: {$visitId}");
+            $message = 'IPD medical record updated successfully!';
+            header('Location: ipd_patients.php?visit_id=' . $visitId . '&tab=medical-records&message=' . urlencode($message));
+            exit();
+        } else {
+            $error = 'Failed to update IPD medical record: ' . $stmt->error;
         }
     }
 }
@@ -1173,8 +1214,10 @@ if (isset($_GET['message'])) {
 
                 <!-- Medical Records Tab Content -->
                 <div class="tab-content <?php echo $activeTab === 'medical-records' ? 'active' : ''; ?>" id="content-medical-records">
+                    <?php if (empty($medicalRecords)): ?>
+                    <!-- No medical record exists - show create form -->
                     <div class="table-card">
-                        <h2 style="margin-bottom: 24px; font-size: 24px; color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px;">Create New Medical Record</h2>
+                        <h2 style="margin-bottom: 24px; font-size: 24px; color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px;">Create Medical Record</h2>
                         <form method="POST" action="">
                             <input type="hidden" name="action" value="create_ipd_record">
                             <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
@@ -1204,39 +1247,51 @@ if (isset($_GET['message'])) {
                             </div>
                         </form>
                     </div>
-
-                    <?php if (!empty($medicalRecords)): ?>
-                    <div class="table-card" style="margin-top: 24px;">
-                        <h3 style="margin-bottom: 20px; font-size: 20px; color: #1e293b;">IPD Medical Records History</h3>
-                        <div style="overflow-x: auto;">
-                            <table style="width: 100%; border-collapse: collapse;">
-                                <thead>
-                                    <tr style="background: #f8fafc;">
-                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Date</th>
-                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Doctor</th>
-                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Diagnosis</th>
-                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Clinical Notes</th>
-                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0;">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($medicalRecords as $record): ?>
-                                    <tr style="border-bottom: 1px solid #e2e8f0;">
-                                        <td style="padding: 12px 16px; color: #64748b;"><?php echo date('M d, Y H:i', strtotime($record['created_at'])); ?></td>
-                                        <td style="padding: 12px 16px; color: #334155;"><?php echo htmlspecialchars($record['doctor_name'] ?? 'N/A'); ?></td>
-                                        <td style="padding: 12px 16px; color: #334155;"><?php echo htmlspecialchars(substr($record['diagnosis'], 0, 100)) . (strlen($record['diagnosis']) > 100 ? '...' : ''); ?></td>
-                                        <td style="padding: 12px 16px; color: #64748b;"><?php echo htmlspecialchars(substr($record['clinical_notes'], 0, 100)) . (strlen($record['clinical_notes']) > 100 ? '...' : ''); ?></td>
-                                        <td style="padding: 12px 16px;">
-                                            <button type="button" onclick="editMedicalRecord(<?php echo $record['record_id']; ?>)" style="padding: 6px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer; transition: all 0.2s;">
-                                                <i class="fas fa-edit"></i> Edit
-                                            </button>
-                                        </td>
-                                    </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
+                    <?php else: ?>
+                    <!-- Medical record exists - show saved data with edit form -->
+                    <?php foreach ($medicalRecords as $record): ?>
+                    <div class="table-card">
+                        <h2 style="margin-bottom: 24px; font-size: 24px; color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px;">Medical Record</h2>
+                        <div style="margin-bottom: 20px;">
+                            <span style="display: inline-block; padding: 4px 12px; background: #dbeafe; color: #1e40af; border-radius: 20px; font-size: 12px; font-weight: 600;">
+                                Created: <?php echo date('M d, Y H:i', strtotime($record['created_at'])); ?>
+                            </span>
+                            <span style="display: inline-block; padding: 4px 12px; background: #dcfce7; color: #166534; border-radius: 20px; font-size: 12px; font-weight: 600; margin-left: 8px;">
+                                Doctor: <?php echo htmlspecialchars($record['doctor_name'] ?? 'N/A'); ?>
+                            </span>
                         </div>
+                        
+                        <form method="POST" action="">
+                            <input type="hidden" name="action" value="update_ipd_record">
+                            <input type="hidden" name="record_id" value="<?php echo $record['record_id']; ?>">
+                            <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
+                            <input type="hidden" name="patient_id" value="<?php echo $selectedPatient['patient_id'] ?? 0; ?>">
+
+                            <div class="form-group" style="margin-bottom: 20px;">
+                                <label style="display: block; font-weight: 600; color: #334155; margin-bottom: 8px;">Attending Doctor</label>
+                                <input type="text" value="<?php echo htmlspecialchars($selectedPatient['attending_doctor'] ?? 'N/A'); ?>" readonly style="width: 100%; padding: 12px 16px; border: 2px solid #e2e8f0; border-radius: 8px; background: #f8fafc; color: #64748b; font-size: 14px;">
+                                <input type="hidden" name="doctor_id" value="<?php echo $selectedPatient['attending_doctor_id'] ?? 0; ?>">
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 20px;">
+                                <label for="edit_diagnosis" style="display: block; font-weight: 600; color: #334155; margin-bottom: 8px;">Diagnosis *</label>
+                                <textarea id="edit_diagnosis" name="diagnosis" rows="4" required style="width: 100%; padding: 12px 16px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; font-family: inherit; resize: vertical; transition: border-color 0.2s;"><?php echo htmlspecialchars($record['diagnosis']); ?></textarea>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 24px;">
+                                <label for="edit_clinical_notes" style="display: block; font-weight: 600; color: #334155; margin-bottom: 8px;">Clinical Notes</label>
+                                <textarea id="edit_clinical_notes" name="clinical_notes" rows="5" style="width: 100%; padding: 12px 16px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; font-family: inherit; resize: vertical; transition: border-color 0.2s;"><?php echo htmlspecialchars($record['clinical_notes']); ?></textarea>
+                            </div>
+
+                            <div class="btn-group" style="display: flex; gap: 12px; margin-top: 28px;">
+                                <button type="submit" class="btn-submit" style="flex: 1; padding: 14px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                                    <i class="fas fa-save"></i> Update Medical Record
+                                </button>
+                                <button type="button" class="btn-cancel" onclick="window.location.href='ipd_patients.php?visit_id=<?php echo $selectedVisitId; ?>&tab=medical-records';" style="flex: 1; padding: 14px 24px; background: #f1f5f9; color: #64748b; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.2s;">Cancel</button>
+                            </div>
+                        </form>
                     </div>
+                    <?php break; endforeach; ?>
                     <?php endif; ?>
                 </div>
 

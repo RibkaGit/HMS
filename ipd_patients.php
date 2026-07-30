@@ -447,6 +447,11 @@ if (isset($_GET['message'])) {
             font-size: 11px;
             text-decoration: none;
             color: white;
+            cursor: pointer;
+            display: inline-block;
+        }
+        .patient-actions a:hover {
+            opacity: 0.9;
         }
         .patient-meta {
             display: grid;
@@ -686,15 +691,9 @@ if (isset($_GET['message'])) {
                             <input type="hidden" name="patient_id" value="<?php echo $selectedPatient['patient_id'] ?? 0; ?>">
 
                             <div class="form-group">
-                                <label for="doctor_id">Attending Doctor *</label>
-                                <select id="doctor_id" name="doctor_id" required>
-                                    <option value="">Select Doctor</option>
-                                    <?php foreach ($doctors as $doc): ?>
-                                        <option value="<?php echo $doc['staff_id']; ?>" <?php echo ($selectedPatient['attending_doctor_id'] == $doc['staff_id']) ? 'selected' : ''; ?>>
-                                            <?php echo htmlspecialchars($doc['name']); ?>
-                                        </option>
-                                    <?php endforeach; ?>
-                                </select>
+                                <label>Attending Doctor</label>
+                                <input type="text" value="<?php echo htmlspecialchars($selectedPatient['attending_doctor'] ?? 'N/A'); ?>" readonly style="background: #f1f5f9;">
+                                <input type="hidden" name="doctor_id" value="<?php echo $selectedPatient['attending_doctor_id'] ?? 0; ?>">
                             </div>
 
                             <div class="form-group">
@@ -769,36 +768,6 @@ if (isset($_GET['message'])) {
                 <!-- Lab Tab -->
                 <div class="tab-content <?php echo $activeTab === 'lab' ? 'active' : ''; ?>" id="tab-lab">
                     <div class="table-card">
-                        <h2 style="margin-bottom: 20px;">Order Lab Tests</h2>
-                        <form method="POST" action="">
-                            <input type="hidden" name="action" value="create_lab_order">
-                            <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
-
-                            <div class="form-group">
-                                <label>Select Lab Tests *</label>
-                                <?php foreach ($labCategories as $category => $tests): ?>
-                                    <div style="margin-bottom: 16px;">
-                                        <strong style="display: block; margin-bottom: 8px; color: #64748b;"><?php echo htmlspecialchars($category); ?></strong>
-                                        <?php foreach ($tests as $test): ?>
-                                            <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-                                                <input type="checkbox" name="test_type_ids[]" value="<?php echo $test['test_type_id']; ?>">
-                                                <?php echo htmlspecialchars($test['name']); ?> - $<?php echo number_format($test['price'], 2); ?>
-                                            </label>
-                                        <?php endforeach; ?>
-                                    </div>
-                                <?php endforeach; ?>
-                            </div>
-
-                            <div class="btn-group">
-                                <button type="submit" class="btn-submit">
-                                    <i class="fas fa-flask"></i> Order Lab Tests
-                                </button>
-                                <button type="button" class="btn-cancel" onclick="window.location.href='ipd_patients.php?visit_id=<?php echo $selectedVisitId; ?>'">Cancel</button>
-                            </div>
-                        </form>
-                    </div>
-
-                    <div class="table-card" style="margin-top: 20px;">
                         <h2 style="margin-bottom: 20px;">Lab Orders History</h2>
                         <?php if (empty($labOrders)): ?>
                             <p style="text-align: center; color: #94a3b8; padding: 32px;">No lab orders found</p>
@@ -825,6 +794,36 @@ if (isset($_GET['message'])) {
                             </div>
                         <?php endif; ?>
                     </div>
+
+                    <div class="table-card" style="margin-top: 20px;">
+                        <h2 style="margin-bottom: 20px;">Order Lab Tests</h2>
+                        <form method="POST" action="">
+                            <input type="hidden" name="action" value="create_lab_order">
+                            <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
+
+                            <div class="form-group">
+                                <label>Select Lab Tests *</label>
+                                <?php foreach ($labCategories as $category => $tests): ?>
+                                    <div style="margin-bottom: 16px;">
+                                        <strong style="display: block; margin-bottom: 8px; color: #64748b;"><?php echo htmlspecialchars($category); ?></strong>
+                                        <?php foreach ($tests as $test): ?>
+                                            <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                                                <input type="checkbox" name="test_type_ids[]" value="<?php echo $test['test_type_id']; ?>">
+                                                <?php echo htmlspecialchars($test['name']); ?>
+                                            </label>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+
+                            <div class="btn-group">
+                                <button type="submit" class="btn-submit">
+                                    <i class="fas fa-flask"></i> Order Lab Tests
+                                </button>
+                                <button type="button" class="btn-cancel" onclick="window.location.href='ipd_patients.php?tab=lab&visit_id=<?php echo $selectedVisitId; ?>'">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
 
                 <!-- Pharmacy Tab -->
@@ -837,15 +836,9 @@ if (isset($_GET['message'])) {
                             <input type="hidden" name="patient_id" value="<?php echo $selectedPatient['patient_id'] ?? 0; ?>">
 
                             <div class="form-group">
-                                <label for="doctor_id">Prescribing Doctor *</label>
-                                <select id="doctor_id" name="doctor_id" required>
-                                    <option value="">Select Doctor</option>
-                                    <?php foreach ($doctors as $doc): ?>
-                                        <option value="<?php echo $doc['staff_id']; ?>" <?php echo ($selectedPatient['attending_doctor_id'] == $doc['staff_id']) ? 'selected' : ''; ?>>
-                                            <?php echo htmlspecialchars($doc['name']); ?>
-                                        </option>
-                                    <?php endforeach; ?>
-                                </select>
+                                <label>Prescribing Doctor</label>
+                                <input type="text" value="<?php echo htmlspecialchars($selectedPatient['attending_doctor'] ?? 'N/A'); ?>" readonly style="background: #f1f5f9;">
+                                <input type="hidden" name="doctor_id" value="<?php echo $selectedPatient['attending_doctor_id'] ?? 0; ?>">
                             </div>
 
                             <div class="form-group">
@@ -895,14 +888,39 @@ if (isset($_GET['message'])) {
                                 <button type="submit" class="btn-submit">
                                     <i class="fas fa-prescription"></i> Create Prescription
                                 </button>
-                                <button type="button" class="btn-cancel" onclick="window.location.href='ipd_patients.php?visit_id=<?php echo $selectedVisitId; ?>'">Cancel</button>
+                                <button type="button" class="btn-cancel" onclick="window.location.href='ipd_patients.php?tab=pharmacy&visit_id=<?php echo $selectedVisitId; ?>'">Cancel</button>
                             </div>
                         </form>
                     </div>
 
                     <div class="table-card" style="margin-top: 20px;">
                         <h2 style="margin-bottom: 20px;">Prescription History</h2>
-                        <p style="text-align: center; color: #94a3b8; padding: 32px;">Prescription history will be displayed here</p>
+                        <?php if (empty($prescriptions)): ?>
+                            <p style="text-align: center; color: #94a3b8; padding: 32px;">No prescriptions found</p>
+                        <?php else: ?>
+                            <div class="table-responsive">
+                                <table class="recent-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Prescribed By</th>
+                                            <th>Notes</th>
+                                            <th>Status</th>
+                                            <th>Created At</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($prescriptions as $rx): ?>
+                                        <tr>
+                                            <td><?php echo htmlspecialchars($rx['doctor_name']); ?></td>
+                                            <td><?php echo htmlspecialchars($rx['notes'] ?? '-'); ?></td>
+                                            <td><?php echo htmlspecialchars($rx['status']); ?></td>
+                                            <td><?php echo date('M d, Y g:i A', strtotime($rx['created_at'])); ?></td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        <?php endif; ?>
                     </div>
                 </div>
 
@@ -1015,7 +1033,7 @@ if (isset($_GET['message'])) {
                                 <button type="submit" class="btn-submit">
                                     <i class="fas fa-save"></i> Save Checkup
                                 </button>
-                                <button type="button" class="btn-cancel" onclick="window.location.href='ipd_patients.php?visit_id=<?php echo $selectedVisitId; ?>'">Cancel</button>
+                                <button type="button" class="btn-cancel" onclick="window.location.href='ipd_patients.php?tab=checkups&visit_id=<?php echo $selectedVisitId; ?>'">Cancel</button>
                             </div>
                         </form>
                     </div>

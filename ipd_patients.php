@@ -1346,7 +1346,7 @@ if (isset($_GET['message'])) {
                                     <?php foreach ($labOrders as $order): ?>
                                     <tr style="border-bottom: 1px solid #e2e8f0;">
                                         <td style="padding: 12px 16px; color: #334155;"><?php echo htmlspecialchars($order['test_name']); ?></td>
-                                        <td style="padding: 12px 16px; color: #64748b;"><?php echo htmlspecialchars($order['test_category']); ?></td>
+                                        <td style="padding: 12px 16px; color: #64748b;"><?php echo htmlspecialchars($order['test_category'] ?? 'N/A'); ?></td>
                                         <td style="padding: 12px 16px;">
                                             <span style="padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; 
                                                 <?php 

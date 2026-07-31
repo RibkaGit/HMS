@@ -274,6 +274,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
+// Discharge patient via GET request (from medical records list)
+if (isset($_GET['action']) && $_GET['action'] === 'discharge_patient' && isset($_GET['visit_id'])) {
+    $visitId = intval($_GET['visit_id']);
+    $dischargedBy = intval($_SESSION['user_id']);
+
+    $query = "UPDATE visits SET discharged_at = NOW(), discharged_by = ?, visit_status_id = (SELECT visit_status_id FROM lookup_visit_statuses WHERE name = 'Discharged') WHERE visit_id = ?";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param('ii', $dischargedBy, $visitId);
+
+    if ($stmt->execute()) {
+        logUserActivity($conn, $_SESSION['user_id'], 'Discharged Patient', "Discharged visit ID: {$visitId} from medical records list");
+        $message = 'Patient discharged successfully!';
+        header('Location: medical_records.php?message=' . urlencode($message));
+        exit();
+    } else {
+        $error = 'Failed to discharge patient. Please try again.';
+    }
+}
+
 // ============================================================================
 // DELETE MEDICAL RECORD
 // ============================================================================
@@ -848,9 +867,7 @@ if (isset($_GET['message'])) {
                         <?php endif; ?>
                     </form>
                 </div>
-                <button class="btn-create" onclick="window.location.href='medical_records.php?action=create_record'">
-                    <i class="fas fa-plus"></i> New Medical Record
-                </button>
+                
             </div>
 
             <!-- Color Legend -->
@@ -1064,6 +1081,11 @@ if (isset($_GET['message'])) {
                                             <button type="button" class="btn-history" data-patient-id="<?php echo $record['patient_id']; ?>" data-patient-name="<?php echo htmlspecialchars($record['patient_name']); ?>">
                                                 <i class="fas fa-clock-rotate-left"></i> History
                                             </button>
+                                            <?php if ($record['visit_id']): ?>
+                                            <a href="medical_records.php?action=discharge_patient&visit_id=<?php echo $record['visit_id']; ?>" class="btn-discharge" onclick="return confirm('Are you sure you want to discharge this patient?');" style="background: #f59e0b;">
+                                                <i class="fas fa-sign-out-alt"></i> Discharge
+                                            </a>
+                                            <?php endif; ?>
                                             <a href="medical_records.php?action=delete_record&id=<?php echo $record['record_id']; ?>" class="btn-delete" onclick="return confirm('Are you sure you want to delete this medical record?');">
                                                 <i class="fas fa-trash"></i> Delete
                                             </a>

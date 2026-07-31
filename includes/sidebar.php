@@ -99,6 +99,12 @@ $currentPage = basename($_SERVER['PHP_SELF']);
                     <span>Pharmacy</span>
                 </a>
             </li>
+            <li class="<?php echo $currentPage == 'materials.php' ? 'active' : ''; ?>">
+                <a href="materials.php">
+                    <i class="fas fa-boxes"></i>
+                    <span>Materials</span>
+                </a>
+            </li>
             <li class="<?php echo $currentPage == 'billing.php' ? 'active' : ''; ?>">
                 <a href="billing.php">
                     <i class="fas fa-file-invoice-dollar"></i>

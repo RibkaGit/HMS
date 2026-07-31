@@ -593,9 +593,7 @@ if (isset($_GET['message'])) {
                         <?php endif; ?>
                     </form>
                 </div>
-                <button class="btn-create" onclick="window.location.href='billing.php?action=create_invoice'">
-                    <i class="fas fa-plus"></i> Create Invoice
-                </button>
+                
             </div>
 
             <!-- Status Filter Tabs -->

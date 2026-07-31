@@ -1195,6 +1195,9 @@ if (isset($_GET['message'])) {
                     <a href="ipd_patients.php?visit_id=<?php echo $selectedVisitId; ?>&tab=history" class="tab <?php echo $activeTab === 'history' ? 'active' : ''; ?>" id="tab-history">
                         <i class="fas fa-history"></i> History
                     </a>
+                    <a href="ipd_patients.php?visit_id=<?php echo $selectedVisitId; ?>&tab=balance" class="tab <?php echo $activeTab === 'balance' ? 'active' : ''; ?>" id="tab-balance">
+                        <i class="fas fa-file-invoice-dollar"></i> Balance
+                    </a>
                 </div>
 
                 <!-- Medical Records Tab Content -->
@@ -1794,6 +1797,298 @@ if (isset($_GET['message'])) {
                             </div>
                         <?php endif; ?>
                     </div>
+                </div>
+
+                <!-- Balance Tab Content -->
+                <div class="tab-content <?php echo $activeTab === 'balance' ? 'active' : ''; ?>" id="content-balance">
+                    <?php if ($selectedPatient): ?>
+                    <?php
+                    // Calculate bed charges
+                    $bedCharges = 0;
+                    $nightsStayed = 0;
+                    $bedRate = 100; // Default bed rate per night
+                    if (!empty($selectedPatient['assigned_at'])) {
+                        $admissionDate = new DateTime($selectedPatient['assigned_at']);
+                        $dischargeDate = $selectedPatient['discharged_at'] ? new DateTime($selectedPatient['discharged_at']) : new DateTime();
+                        $interval = $admissionDate->diff($dischargeDate);
+                        $nightsStayed = $interval->days;
+                        if ($nightsStayed < 1) $nightsStayed = 1; // Minimum 1 night
+                        $bedCharges = $nightsStayed * $bedRate;
+                    }
+
+                    // Calculate medicine costs from prescriptions
+                    $medicineCosts = 0;
+                    $prescriptionItemsQuery = "SELECT pi.*, m.unit_price
+                                              FROM prescription_items pi
+                                              JOIN medications m ON pi.medication_id = m.medication_id
+                                              JOIN prescriptions p ON pi.prescription_id = p.prescription_id
+                                              WHERE p.visit_id = ?";
+                    $prescriptionItemsStmt = $conn->prepare($prescriptionItemsQuery);
+                    $prescriptionItemsStmt->bind_param('i', $selectedVisitId);
+                    $prescriptionItemsStmt->execute();
+                    $prescriptionItems = $prescriptionItemsStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+                    foreach ($prescriptionItems as $item) {
+                        $medicineCosts += ($item['quantity'] * $item['unit_price']);
+                    }
+
+                    // Calculate material costs
+                    $materialCosts = 0;
+                    $materialUsage = [];
+                    $materialUsageQuery = "SELECT mu.*, m.unit_price
+                                          FROM material_usage mu
+                                          JOIN materials m ON mu.material_id = m.material_id
+                                          WHERE mu.visit_id = ?";
+                    $materialUsageStmt = $conn->prepare($materialUsageQuery);
+                    if ($materialUsageStmt) {
+                        $materialUsageStmt->bind_param('i', $selectedVisitId);
+                        $materialUsageStmt->execute();
+                        $materialUsage = $materialUsageStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+                        foreach ($materialUsage as $usage) {
+                            $materialCosts += $usage['total_cost'];
+                        }
+                    }
+
+                    // Calculate lab costs
+                    $labCosts = 0;
+                    $labOrdersData = [];
+                    $labOrdersQuery = "SELECT lo.*, lt.price
+                                       FROM lab_orders lo
+                                       JOIN lookup_test_types lt ON lo.test_type_id = lt.test_type_id
+                                       WHERE lo.visit_id = ?";
+                    $labOrdersStmt = $conn->prepare($labOrdersQuery);
+                    if ($labOrdersStmt) {
+                        $labOrdersStmt->bind_param('i', $selectedVisitId);
+                        $labOrdersStmt->execute();
+                        $labOrdersData = $labOrdersStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+                        foreach ($labOrdersData as $lab) {
+                            $labCosts += ($lab['price'] ?? 50); // Default price if not set
+                        }
+                    }
+
+                    // Calculate radiology costs
+                    $radiologyCosts = 0;
+                    $radiologyOrdersData = [];
+                    $radiologyOrdersQuery = "SELECT ro.*, rt.price
+                                            FROM radiology_orders ro
+                                            JOIN radiology_types rt ON ro.radiology_type_id = rt.radiology_type_id
+                                            WHERE ro.visit_id = ?";
+                    $radiologyOrdersStmt = $conn->prepare($radiologyOrdersQuery);
+                    if ($radiologyOrdersStmt) {
+                        $radiologyOrdersStmt->bind_param('i', $selectedVisitId);
+                        $radiologyOrdersStmt->execute();
+                        $radiologyOrdersData = $radiologyOrdersStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+                        foreach ($radiologyOrdersData as $rad) {
+                            $radiologyCosts += ($rad['price'] ?? 100); // Default price if not set
+                        }
+                    }
+
+                    $totalAmount = $bedCharges + $medicineCosts + $materialCosts + $labCosts + $radiologyCosts;
+                    ?>
+
+                    <div class="table-card" style="margin-bottom: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <h2 style="margin: 0; color: white;"><?php echo htmlspecialchars($selectedPatient['patient_name']); ?></h2>
+                                <p style="margin: 4px 0 0 0; opacity: 0.9;">
+                                    <?php echo htmlspecialchars($selectedPatient['patient_code']); ?> ·
+                                    <?php echo htmlspecialchars($selectedPatient['visit_code']); ?> ·
+                                    <?php echo htmlspecialchars($selectedPatient['ward_name'] ?? 'N/A'); ?> / <?php echo htmlspecialchars($selectedPatient['bed_number'] ?? 'N/A'); ?>
+                                </p>
+                            </div>
+                            <div style="text-align: right;">
+                                <p style="margin: 0; opacity: 0.9;">Total Balance</p>
+                                <p style="margin: 4px 0 0 0; font-size: 28px; font-weight: 700;">$<?php echo number_format($totalAmount, 2); ?></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 24px;">
+                        <!-- Bed Charges -->
+                        <div class="table-card" style="background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); border: 2px solid #93c5fd;">
+                            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                                <i class="fas fa-bed" style="font-size: 24px; color: #1e40af;"></i>
+                                <div>
+                                    <h3 style="margin: 0; color: #1e40af;">Bed Charges</h3>
+                                    <p style="margin: 0; font-size: 13px; color: #3b82f6;"><?php echo $nightsStayed; ?> night(s) @ $<?php echo $bedRate; ?>/night</p>
+                                </div>
+                            </div>
+                            <p style="font-size: 32px; font-weight: 700; color: #1e40af; margin: 0;">$<?php echo number_format($bedCharges, 2); ?></p>
+                        </div>
+
+                        <!-- Medicine Costs -->
+                        <div class="table-card" style="background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%); border: 2px solid #86efac;">
+                            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                                <i class="fas fa-pills" style="font-size: 24px; color: #166534;"></i>
+                                <div>
+                                    <h3 style="margin: 0; color: #166534;">Medicine Costs</h3>
+                                    <p style="margin: 0; font-size: 13px; color: #22c55e;"><?php echo count($prescriptionItems); ?> medication(s)</p>
+                                </div>
+                            </div>
+                            <p style="font-size: 32px; font-weight: 700; color: #166534; margin: 0;">$<?php echo number_format($medicineCosts, 2); ?></p>
+                        </div>
+
+                        <!-- Material Costs -->
+                        <div class="table-card" style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border: 2px solid #fcd34d;">
+                            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                                <i class="fas fa-boxes" style="font-size: 24px; color: #92400e;"></i>
+                                <div>
+                                    <h3 style="margin: 0; color: #92400e;">Material Costs</h3>
+                                    <p style="margin: 0; font-size: 13px; color: #b45309;"><?php echo count($materialUsage); ?> item(s) used</p>
+                                </div>
+                            </div>
+                            <p style="font-size: 32px; font-weight: 700; color: #92400e; margin: 0;">$<?php echo number_format($materialCosts, 2); ?></p>
+                        </div>
+
+                        <!-- Lab Costs -->
+                        <div class="table-card" style="background: linear-gradient(135deg, #f3e8ff 0%, #e9d5ff 100%); border: 2px solid #d8b4fe;">
+                            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                                <i class="fas fa-flask" style="font-size: 24px; color: #7c3aed;"></i>
+                                <div>
+                                    <h3 style="margin: 0; color: #7c3aed;">Lab Tests</h3>
+                                    <p style="margin: 0; font-size: 13px; color: #8b5cf6;"><?php echo count($labOrdersData); ?> test(s)</p>
+                                </div>
+                            </div>
+                            <p style="font-size: 32px; font-weight: 700; color: #7c3aed; margin: 0;">$<?php echo number_format($labCosts, 2); ?></p>
+                        </div>
+
+                        <!-- Radiology Costs -->
+                        <div class="table-card" style="background: linear-gradient(135deg, #fce7f3 0%, #fbcfe8 100%); border: 2px solid #f9a8d4;">
+                            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                                <i class="fas fa-x-ray" style="font-size: 24px; color: #be185d;"></i>
+                                <div>
+                                    <h3 style="margin: 0; color: #be185d;">Radiology</h3>
+                                    <p style="margin: 0; font-size: 13px; color: #db2777;"><?php echo count($radiologyOrdersData); ?> scan(s)</p>
+                                </div>
+                            </div>
+                            <p style="font-size: 32px; font-weight: 700; color: #be185d; margin: 0;">$<?php echo number_format($radiologyCosts, 2); ?></p>
+                        </div>
+                    </div>
+
+                    <!-- Detailed Breakdown -->
+                    <div class="table-card">
+                        <h3 style="margin-bottom: 20px; font-size: 20px; color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px;">
+                            <i class="fas fa-list" style="color: #3b82f6; margin-right: 8px;"></i> Detailed Breakdown
+                        </h3>
+
+                        <!-- Material Usage Details -->
+                        <?php if (!empty($materialUsage)): ?>
+                        <div style="margin-bottom: 24px;">
+                            <h4 style="margin-bottom: 12px; color: #92400e; font-size: 16px;">Materials Used</h4>
+                            <div style="overflow-x: auto;">
+                                <table style="width: 100%; border-collapse: collapse;">
+                                    <thead>
+                                        <tr style="background: #fef3c7;">
+                                            <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: #92400e;">Material</th>
+                                            <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: #92400e;">Quantity</th>
+                                            <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: #92400e;">Unit Cost</th>
+                                            <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: #92400e;">Total</th>
+                                            <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: #92400e;">Date</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($materialUsage as $usage): ?>
+                                        <tr style="border-bottom: 1px solid #fcd34d;">
+                                            <td style="padding: 10px 12px; color: #334155;"><?php echo htmlspecialchars($usage['name'] ?? 'Unknown'); ?></td>
+                                            <td style="padding: 10px 12px; color: #64748b;"><?php echo $usage['quantity_used']; ?> <?php echo htmlspecialchars($usage['unit'] ?? ''); ?></td>
+                                            <td style="padding: 10px 12px; color: #64748b;">$<?php echo number_format($usage['unit_cost'], 2); ?></td>
+                                            <td style="padding: 10px 12px; color: #334155; font-weight: 600;">$<?php echo number_format($usage['total_cost'], 2); ?></td>
+                                            <td style="padding: 10px 12px; color: #64748b;"><?php echo date('M d, Y H:i', strtotime($usage['used_at'])); ?></td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <?php endif; ?>
+
+                        <!-- Prescription Details -->
+                        <?php if (!empty($prescriptionItems)): ?>
+                        <div style="margin-bottom: 24px;">
+                            <h4 style="margin-bottom: 12px; color: #166534; font-size: 16px;">Medications</h4>
+                            <div style="overflow-x: auto;">
+                                <table style="width: 100%; border-collapse: collapse;">
+                                    <thead>
+                                        <tr style="background: #dcfce7;">
+                                            <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: #166534;">Medication</th>
+                                            <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: #166534;">Quantity</th>
+                                            <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: #166534;">Unit Price</th>
+                                            <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: #166534;">Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($prescriptionItems as $item): ?>
+                                        <tr style="border-bottom: 1px solid #86efac;">
+                                            <td style="padding: 10px 12px; color: #334155;"><?php echo htmlspecialchars($item['name'] ?? 'Unknown'); ?></td>
+                                            <td style="padding: 10px 12px; color: #64748b;"><?php echo $item['quantity']; ?></td>
+                                            <td style="padding: 10px 12px; color: #64748b;">$<?php echo number_format($item['unit_price'], 2); ?></td>
+                                            <td style="padding: 10px 12px; color: #334155; font-weight: 600;">$<?php echo number_format($item['quantity'] * $item['unit_price'], 2); ?></td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <?php endif; ?>
+
+                        <!-- Lab Tests Details -->
+                        <?php if (!empty($labOrdersData)): ?>
+                        <div style="margin-bottom: 24px;">
+                            <h4 style="margin-bottom: 12px; color: #7c3aed; font-size: 16px;">Lab Tests</h4>
+                            <div style="overflow-x: auto;">
+                                <table style="width: 100%; border-collapse: collapse;">
+                                    <thead>
+                                        <tr style="background: #f3e8ff;">
+                                            <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: #7c3aed;">Test</th>
+                                            <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: #7c3aed;">Price</th>
+                                            <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: #7c3aed;">Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($labOrdersData as $lab): ?>
+                                        <tr style="border-bottom: 1px solid #d8b4fe;">
+                                            <td style="padding: 10px 12px; color: #334155;"><?php echo htmlspecialchars($lab['test_name'] ?? 'Unknown'); ?></td>
+                                            <td style="padding: 10px 12px; color: #64748b;">$<?php echo number_format($lab['price'] ?? 50, 2); ?></td>
+                                            <td style="padding: 10px 12px; color: #64748b;"><?php echo htmlspecialchars($lab['status_name'] ?? 'Ordered'); ?></td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <?php endif; ?>
+
+                        <!-- Radiology Details -->
+                        <?php if (!empty($radiologyOrdersData)): ?>
+                        <div>
+                            <h4 style="margin-bottom: 12px; color: #be185d; font-size: 16px;">Radiology Scans</h4>
+                            <div style="overflow-x: auto;">
+                                <table style="width: 100%; border-collapse: collapse;">
+                                    <thead>
+                                        <tr style="background: #fce7f3;">
+                                            <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: #be185d;">Scan Type</th>
+                                            <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: #be185d;">Price</th>
+                                            <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: #be185d;">Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($radiologyOrdersData as $rad): ?>
+                                        <tr style="border-bottom: 1px solid #f9a8d4;">
+                                            <td style="padding: 10px 12px; color: #334155;"><?php echo htmlspecialchars($rad['radiology_type_name'] ?? 'Unknown'); ?></td>
+                                            <td style="padding: 10px 12px; color: #64748b;">$<?php echo number_format($rad['price'] ?? 100, 2); ?></td>
+                                            <td style="padding: 10px 12px; color: #64748b;"><?php echo htmlspecialchars($rad['status_name'] ?? 'Ordered'); ?></td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                    <?php endif; ?>
                 </div>
             <?php endif; ?>
         </main>

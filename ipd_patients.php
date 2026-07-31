@@ -203,19 +203,15 @@ if ($selectedVisitId > 0) {
         $ipdCheckResult = $ipdCheckStmt->get_result();
         
         if ($ipdCheckResult->num_rows > 0) {
-            // This is an IPD visit, get admission date and filter checkups
-            $ipdVisit = $ipdCheckResult->fetch_assoc();
-            $admissionDate = $ipdVisit['admission_date'];
-            
-            // Only fetch checkups created on or after IPD admission
+            // This is an IPD visit, fetch ALL checkups for this visit ordered by checkup time
             $checkupsQuery = "SELECT ic.*, CONCAT(s.first_name, ' ', s.last_name) as recorded_by_name
                               FROM ipd_checkups ic
                               LEFT JOIN staff s ON ic.recorded_by = s.staff_id
-                              WHERE ic.visit_id = ? AND ic.checkup_time >= ?
-                              ORDER BY ic.checkup_time DESC";
+                              WHERE ic.visit_id = ?
+                              ORDER BY ic.checkup_time ASC";
             $checkupsStmt = $conn->prepare($checkupsQuery);
             if ($checkupsStmt) {
-                $checkupsStmt->bind_param('is', $selectedVisitId, $admissionDate);
+                $checkupsStmt->bind_param('i', $selectedVisitId);
                 $checkupsStmt->execute();
                 $checkups = $checkupsStmt->get_result()->fetch_all(MYSQLI_ASSOC);
             } else {
@@ -891,12 +887,7 @@ if (isset($_GET['message'])) {
                     <a href="ipd_patients.php?tab=patients" class="tab <?php echo $activeTab === 'patients' || $activeTab === 'overview' ? 'active' : ''; ?>" id="tab-patients">
                         <i class="fas fa-users"></i> Patients
                     </a>
-                    <a href="ipd_patients.php?tab=lab-management" class="tab <?php echo $activeTab === 'lab-management' ? 'active' : ''; ?>" id="tab-lab-management">
-                        <i class="fas fa-flask"></i> Lab Management
-                    </a>
-                    <a href="ipd_patients.php?tab=pharmacy-management" class="tab <?php echo $activeTab === 'pharmacy-management' ? 'active' : ''; ?>" id="tab-pharmacy-management">
-                        <i class="fas fa-pills"></i> Pharmacy Management
-                    </a>
+                    
                 </div>
 
                 <?php if ($activeTab === 'patients' || $activeTab === 'overview'): ?>
@@ -1198,12 +1189,6 @@ if (isset($_GET['message'])) {
                     <a href="ipd_patients.php?visit_id=<?php echo $selectedVisitId; ?>&tab=medical-records" class="tab <?php echo $activeTab === 'medical-records' ? 'active' : ''; ?>" id="tab-medical-records">
                         <i class="fas fa-notes-medical"></i> Medical Records
                     </a>
-                    <a href="ipd_patients.php?visit_id=<?php echo $selectedVisitId; ?>&tab=lab" class="tab <?php echo $activeTab === 'lab' ? 'active' : ''; ?>" id="tab-lab">
-                        <i class="fas fa-flask"></i> Lab
-                    </a>
-                    <a href="ipd_patients.php?visit_id=<?php echo $selectedVisitId; ?>&tab=pharmacy" class="tab <?php echo $activeTab === 'pharmacy' ? 'active' : ''; ?>" id="tab-pharmacy">
-                        <i class="fas fa-pills"></i> Pharmacy
-                    </a>
                     <a href="ipd_patients.php?visit_id=<?php echo $selectedVisitId; ?>&tab=checkups" class="tab <?php echo $activeTab === 'checkups' ? 'active' : ''; ?>" id="tab-checkups">
                         <i class="fas fa-clipboard-user"></i> Checkups
                     </a>
@@ -1358,7 +1343,7 @@ if (isset($_GET['message'])) {
                                                 <?php echo htmlspecialchars($order['status_name']); ?>
                                             </span>
                                         </td>
-                                        <td style="padding: 12px 16px; color: #64748b;"><?php echo date('M d, Y H:i', strtotime($order['created_at'])); ?></td>
+                                        <td style="padding: 12px 16px; color: #64748b;"><?php echo date('M d, Y H:i', strtotime($order['created_at'] ?? 'now')); ?></td>
                                     </tr>
                                     <?php endforeach; ?>
                                 </tbody>

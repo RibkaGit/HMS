@@ -99,10 +99,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $needsBed = isset($_POST['needs_bed']) ? 1 : 0;
     $needsRadiology = isset($_POST['needs_radiology']) ? 1 : 0;
     $needsPharmacy = isset($_POST['needs_pharmacy']) ? 1 : 0;
-    $query = "INSERT INTO medical_records (visit_id, patient_id, doctor_id, diagnosis, clinical_notes, needs_lab, needs_radiology, needs_bed, needs_pharmacy) 
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    $needsOr = isset($_POST['needs_or']) ? 1 : 0;
+    $query = "INSERT INTO medical_records (visit_id, patient_id, doctor_id, diagnosis, clinical_notes, needs_lab, needs_radiology, needs_bed, needs_pharmacy, needs_or)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     $stmt = $conn->prepare($query);
-    $stmt->bind_param('iiissiiii', 
+    $stmt->bind_param('iiissiiiii',
         $visitId,
         $patientId,
         $doctorId,
@@ -111,14 +112,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $needsLab,
         $needsRadiology,
         $needsBed,
-        $needsPharmacy
+        $needsPharmacy,
+        $needsOr
     );
     
     if ($stmt->execute()) {
         $recordId = $conn->insert_id;
         logUserActivity($conn, $_SESSION['user_id'], 'Created Medical Record', "Created medical record ID: {$recordId}");
         $message = 'Medical record created successfully!';
-        if ($needsLab || $needsRadiology || $needsBed || $needsPharmacy) {
+        if ($needsLab || $needsRadiology || $needsBed || $needsPharmacy || $needsOr) {
             $parts = [];
             if ($needsLab) {
                 $parts[] = 'sent to lab queue';
@@ -131,6 +133,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             }
             if ($needsPharmacy) {
                 $parts[] = 'sent to pharmacy queue';
+            }
+            if ($needsOr) {
+                $parts[] = 'sent to OR queue';
             }
             $message .= ' Patient ' . implode(' and ', $parts) . '.';
         }

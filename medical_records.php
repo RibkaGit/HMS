@@ -160,24 +160,43 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_balance' && isset($_GET['
     <!-- Payment Section -->
     <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 24px; border: 2px solid #e2e8f0;">
         <h4 style="margin: 0 0 16px 0; font-size: 16px; font-weight: 600; color: #1e293b;">Payment Method</h4>
-        <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+        
+        <!-- Advance Payment -->
+        <div style="margin-bottom: 12px;">
             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px 16px; background: white; border: 2px solid #e2e8f0; border-radius: 6px;">
-                <input type="radio" name="payment_type" value="advance" id="payment_advance" onchange="togglePaymentFields()">
+                <input type="checkbox" name="payment_advance" id="payment_advance" onclick="toggleAmountField('advance')">
                 <span>Advance Payment</span>
             </label>
+            <div id="amountField_advance" style="margin-top: 8px; display: none;">
+                <label style="display: block; margin-bottom: 4px; font-weight: 500; color: #475569; font-size: 13px;">Amount (Birr)</label>
+                <input type="number" id="amount_advance" step="0.01" min="0" placeholder="Enter advance amount" style="width: 100%; padding: 8px; border: 2px solid #e2e8f0; border-radius: 6px;">
+            </div>
+        </div>
+        
+        <!-- Payment -->
+        <div style="margin-bottom: 12px;">
             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px 16px; background: white; border: 2px solid #e2e8f0; border-radius: 6px;">
-                <input type="radio" name="payment_type" value="payment" id="payment_payment" onchange="togglePaymentFields()">
+                <input type="checkbox" name="payment_payment" id="payment_payment" onclick="toggleAmountField('payment')">
                 <span>Payment</span>
             </label>
+            <div id="amountField_payment" style="margin-top: 8px; display: none;">
+                <label style="display: block; margin-bottom: 4px; font-weight: 500; color: #475569; font-size: 13px;">Amount (Birr)</label>
+                <input type="number" id="amount_payment" step="0.01" min="0" placeholder="Enter payment amount" style="width: 100%; padding: 8px; border: 2px solid #e2e8f0; border-radius: 6px;">
+            </div>
+        </div>
+        
+        <!-- Settlement -->
+        <div style="margin-bottom: 12px;">
             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px 16px; background: white; border: 2px solid #e2e8f0; border-radius: 6px;">
-                <input type="radio" name="payment_type" value="settlement" id="payment_settlement" onchange="togglePaymentFields()">
+                <input type="checkbox" name="payment_settlement" id="payment_settlement" onclick="toggleAmountField('settlement')">
                 <span>Settlement</span>
             </label>
+            <div id="amountField_settlement" style="margin-top: 8px; display: none;">
+                <label style="display: block; margin-bottom: 4px; font-weight: 500; color: #475569; font-size: 13px;">Amount (Birr)</label>
+                <input type="number" id="amount_settlement" step="0.01" min="0" placeholder="Enter settlement amount" style="width: 100%; padding: 8px; border: 2px solid #e2e8f0; border-radius: 6px;">
+            </div>
         </div>
-        <div id="paymentAmountField" style="margin-top: 16px; display: none;">
-            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #475569;">Amount (Birr)</label>
-            <input type="number" id="paymentAmount" step="0.01" min="0" placeholder="Enter amount" style="width: 100%; padding: 10px; border: 2px solid #e2e8f0; border-radius: 6px;">
-        </div>
+        
         <button type="button" onclick="processPayment(<?php echo $visitId; ?>)" style="margin-top: 16px; padding: 10px 20px; background: #16a34a; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500;">
             <i class="fas fa-check"></i> Process Payment
         </button>
@@ -287,56 +306,86 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_balance' && isset($_GET['
     <?php endif; ?>
 
     <script>
-        function togglePaymentFields() {
-            const amountField = document.getElementById('paymentAmountField');
-            const advanceRadio = document.getElementById('payment_advance');
-            const paymentRadio = document.getElementById('payment_payment');
-            const settlementRadio = document.getElementById('payment_settlement');
+        // Make functions global so they work after AJAX load
+        window.toggleAmountField = function(type) {
+            const checkbox = document.getElementById('payment_' + type);
+            const amountField = document.getElementById('amountField_' + type);
             
-            if (advanceRadio.checked || paymentRadio.checked || settlementRadio.checked) {
-                amountField.style.display = 'block';
-            } else {
-                amountField.style.display = 'none';
-            }
-        }
-
-        function processPayment(visitId) {
-            const paymentType = document.querySelector('input[name="payment_type"]:checked');
-            const amount = document.getElementById('paymentAmount').value;
-            
-            if (!paymentType) {
-                alert('Please select a payment type');
-                return;
-            }
-            
-            if (!amount || parseFloat(amount) <= 0) {
-                alert('Please enter a valid amount');
-                return;
-            }
-
-            const formData = new FormData();
-            formData.append('action', 'process_payment');
-            formData.append('visit_id', visitId);
-            formData.append('payment_type', paymentType.value);
-            formData.append('amount', amount);
-
-            fetch('medical_records.php', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    alert('Payment processed successfully');
-                    openBalanceModal(visitId); // Refresh the modal
+            if (checkbox && amountField) {
+                if (checkbox.checked) {
+                    amountField.style.display = 'block';
                 } else {
-                    alert('Error: ' + data.error);
+                    amountField.style.display = 'none';
                 }
-            })
-            .catch(error => {
-                alert('Error processing payment');
+            }
+        };
+
+        window.processPayment = function(visitId) {
+            const advanceCheckbox = document.getElementById('payment_advance');
+            const paymentCheckbox = document.getElementById('payment_payment');
+            const settlementCheckbox = document.getElementById('payment_settlement');
+            
+            const advanceAmount = document.getElementById('amount_advance') ? document.getElementById('amount_advance').value : '';
+            const paymentAmount = document.getElementById('amount_payment') ? document.getElementById('amount_payment').value : '';
+            const settlementAmount = document.getElementById('amount_settlement') ? document.getElementById('amount_settlement').value : '';
+            
+            let hasPayment = false;
+            let totalAmount = 0;
+            let paymentTypes = [];
+            
+            if (advanceCheckbox && advanceCheckbox.checked && advanceAmount && parseFloat(advanceAmount) > 0) {
+                hasPayment = true;
+                totalAmount += parseFloat(advanceAmount);
+                paymentTypes.push({type: 'advance', amount: advanceAmount});
+            }
+            
+            if (paymentCheckbox && paymentCheckbox.checked && paymentAmount && parseFloat(paymentAmount) > 0) {
+                hasPayment = true;
+                totalAmount += parseFloat(paymentAmount);
+                paymentTypes.push({type: 'payment', amount: paymentAmount});
+            }
+            
+            if (settlementCheckbox && settlementCheckbox.checked && settlementAmount && parseFloat(settlementAmount) > 0) {
+                hasPayment = true;
+                totalAmount += parseFloat(settlementAmount);
+                paymentTypes.push({type: 'settlement', amount: settlementAmount});
+            }
+            
+            if (!hasPayment) {
+                alert('Please select at least one payment type and enter a valid amount');
+                return;
+            }
+
+            // Process each payment type
+            let processedCount = 0;
+            paymentTypes.forEach(payment => {
+                const formData = new FormData();
+                formData.append('action', 'process_payment');
+                formData.append('visit_id', visitId);
+                formData.append('payment_type', payment.type);
+                formData.append('amount', payment.amount);
+
+                fetch('medical_records.php', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        processedCount++;
+                        if (processedCount === paymentTypes.length) {
+                            alert('Payment(s) processed successfully');
+                            openBalanceModal(visitId); // Refresh the modal
+                        }
+                    } else {
+                        alert('Error processing ' + payment.type + ': ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    alert('Error processing payment');
+                });
             });
-        }
+        };
     </script>
     <?php
     echo ob_get_clean();

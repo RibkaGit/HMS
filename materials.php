@@ -85,6 +85,27 @@ if (isset($_GET['action']) && $_GET['action'] === 'delete_material' && isset($_G
 }
 
 // ============================================================================
+// GET MATERIAL (AJAX)
+// ============================================================================
+if (isset($_GET['action']) && $_GET['action'] === 'get_material' && isset($_GET['id'])) {
+    header('Content-Type: application/json');
+    $materialId = intval($_GET['id']);
+    
+    $query = "SELECT * FROM materials WHERE material_id = ?";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param('i', $materialId);
+    $stmt->execute();
+    $material = $stmt->get_result()->fetch_assoc();
+    
+    if ($material) {
+        echo json_encode(['success' => true, 'material' => $material]);
+    } else {
+        echo json_encode(['success' => false, 'error' => 'Material not found']);
+    }
+    exit();
+}
+
+// ============================================================================
 // RESTOCK MATERIAL
 // ============================================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'restock_material') {
@@ -165,6 +186,110 @@ if (isset($_GET['message'])) {
             background: #fee2e2;
             color: #991b1b;
         }
+        .btn-create {
+            padding: 10px 20px;
+            background: #2563eb;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-create:hover {
+            background: #1d4ed8;
+        }
+        .form-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            padding: 20px;
+        }
+        .form-modal-content {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            max-width: 500px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            position: relative;
+        }
+        .close-btn {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #64748b;
+        }
+        .close-btn:hover {
+            color: #334155;
+        }
+        .form-group {
+            margin-bottom: 16px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 500;
+            color: #334155;
+        }
+        .form-group input,
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e2e8f0;
+            border-radius: 6px;
+            font-family: inherit;
+        }
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        .btn-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 24px;
+        }
+        .btn-submit {
+            padding: 10px 20px;
+            background: #16a34a;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .btn-submit:hover {
+            background: #15803d;
+        }
+        .btn-cancel {
+            padding: 10px 20px;
+            background: #64748b;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .btn-cancel:hover {
+            background: #475569;
+        }
     </style>
 </head>
 <body>
@@ -202,7 +327,7 @@ if (isset($_GET['message'])) {
             <div class="table-card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                     <h2 style="margin: 0;">Materials Inventory (<?php echo count($materials); ?>)</h2>
-                    <button class="btn-create" onclick="window.location.href='materials.php?action=create_material'">
+                    <button class="btn-create" onclick="openMaterialModal()">
                         <i class="fas fa-plus"></i> Add Material
                     </button>
                 </div>
@@ -262,9 +387,9 @@ if (isset($_GET['message'])) {
                                     </td>
                                     <td>
                                         <div class="action-buttons">
-                                            <a href="materials.php?action=edit_material&id=<?php echo $material['material_id']; ?>" class="btn-edit">
+                                            <button type="button" class="btn-edit" onclick="editMaterial(<?php echo $material['material_id']; ?>)">
                                                 <i class="fas fa-edit"></i> Edit
-                                            </a>
+                                            </button>
                                             <a href="materials.php?action=delete_material&id=<?php echo $material['material_id']; ?>" class="btn-delete" onclick="return confirm('Are you sure you want to delete this material?');">
                                                 <i class="fas fa-trash"></i> Delete
                                             </a>
@@ -281,59 +406,57 @@ if (isset($_GET['message'])) {
     </div>
 
     <!-- Create/Edit Material Modal -->
-    <div class="form-modal" id="materialModal" style="display: <?php echo ($editMaterial || isset($_GET['action']) && $_GET['action'] === 'create_material') ? 'flex' : 'none'; ?>;">
+    <div class="form-modal" id="materialModal" style="display: none;">
         <div class="form-modal-content">
-            <button class="close-btn" onclick="window.location.href='materials.php'">&times;</button>
-            <h2 style="margin-bottom: 24px;"><?php echo $editMaterial ? 'Edit Material' : 'Add New Material'; ?></h2>
+            <button class="close-btn" onclick="closeMaterialModal()">&times;</button>
+            <h2 style="margin-bottom: 24px;" id="materialModalTitle">Add New Material</h2>
 
-            <form method="POST" action="">
-                <input type="hidden" name="action" value="<?php echo $editMaterial ? 'update_material' : 'create_material'; ?>">
-                <?php if ($editMaterial): ?>
-                    <input type="hidden" name="material_id" value="<?php echo $editMaterial['material_id']; ?>">
-                <?php endif; ?>
+            <form method="POST" action="" id="materialForm">
+                <input type="hidden" name="action" id="formAction" value="create_material">
+                <input type="hidden" name="material_id" id="materialId">
 
                 <div class="form-group">
                     <label for="name">Material Name *</label>
-                    <input type="text" id="name" name="name" required value="<?php echo htmlspecialchars($editMaterial['name'] ?? ''); ?>">
+                    <input type="text" id="name" name="name" required>
                 </div>
 
                 <div class="form-group">
                     <label for="description">Description</label>
-                    <textarea id="description" name="description" rows="3"><?php echo htmlspecialchars($editMaterial['description'] ?? ''); ?></textarea>
+                    <textarea id="description" name="description" rows="3"></textarea>
                 </div>
 
                 <div class="form-row">
                     <div class="form-group">
                         <label for="unit">Unit *</label>
-                        <input type="text" id="unit" name="unit" required placeholder="e.g., piece, pair, roll" value="<?php echo htmlspecialchars($editMaterial['unit'] ?? ''); ?>">
+                        <input type="text" id="unit" name="unit" required placeholder="e.g., piece, pair, roll">
                     </div>
                     <div class="form-group">
                         <label for="category">Category</label>
-                        <input type="text" id="category" name="category" placeholder="e.g., Surgical, General" value="<?php echo htmlspecialchars($editMaterial['category'] ?? ''); ?>">
+                        <input type="text" id="category" name="category" placeholder="e.g., Surgical, General">
                     </div>
                 </div>
 
                 <div class="form-row">
                     <div class="form-group">
                         <label for="unit_price">Unit Price *</label>
-                        <input type="number" id="unit_price" name="unit_price" step="0.01" min="0" required value="<?php echo htmlspecialchars($editMaterial['unit_price'] ?? ''); ?>">
+                        <input type="number" id="unit_price" name="unit_price" step="0.01" min="0" required>
                     </div>
                     <div class="form-group">
                         <label for="stock_quantity">Stock Quantity *</label>
-                        <input type="number" id="stock_quantity" name="stock_quantity" min="0" required value="<?php echo htmlspecialchars($editMaterial['stock_quantity'] ?? ''); ?>">
+                        <input type="number" id="stock_quantity" name="stock_quantity" min="0" required>
                     </div>
                 </div>
 
                 <div class="form-group">
                     <label for="minimum_stock">Minimum Stock Alert Level</label>
-                    <input type="number" id="minimum_stock" name="minimum_stock" min="0" value="<?php echo htmlspecialchars($editMaterial['minimum_stock'] ?? 10); ?>">
+                    <input type="number" id="minimum_stock" name="minimum_stock" min="0" value="10">
                 </div>
 
                 <div class="btn-group">
                     <button type="submit" class="btn-submit">
-                        <i class="fas fa-save"></i> <?php echo $editMaterial ? 'Update Material' : 'Create Material'; ?>
+                        <i class="fas fa-save"></i> <span id="submitBtnText">Create Material</span>
                     </button>
-                    <button type="button" class="btn-cancel" onclick="window.location.href='materials.php'">Cancel</button>
+                    <button type="button" class="btn-cancel" onclick="closeMaterialModal()">Cancel</button>
                 </div>
             </form>
         </div>
@@ -343,6 +466,45 @@ if (isset($_GET['message'])) {
         document.getElementById('menuToggle').addEventListener('click', function() {
             document.querySelector('.sidebar').classList.toggle('collapsed');
         });
+
+        function openMaterialModal() {
+            document.getElementById('materialModal').style.display = 'flex';
+            document.getElementById('materialModalTitle').textContent = 'Add New Material';
+            document.getElementById('formAction').value = 'create_material';
+            document.getElementById('materialId').value = '';
+            document.getElementById('submitBtnText').textContent = 'Create Material';
+            document.getElementById('materialForm').reset();
+        }
+
+        function closeMaterialModal() {
+            document.getElementById('materialModal').style.display = 'none';
+        }
+
+        function editMaterial(materialId) {
+            // Fetch material data and populate form
+            fetch('materials.php?action=get_material&id=' + materialId)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('materialModal').style.display = 'flex';
+                        document.getElementById('materialModalTitle').textContent = 'Edit Material';
+                        document.getElementById('formAction').value = 'update_material';
+                        document.getElementById('materialId').value = materialId;
+                        document.getElementById('submitBtnText').textContent = 'Update Material';
+                        
+                        document.getElementById('name').value = data.material.name;
+                        document.getElementById('description').value = data.material.description || '';
+                        document.getElementById('unit').value = data.material.unit;
+                        document.getElementById('category').value = data.material.category || '';
+                        document.getElementById('unit_price').value = data.material.unit_price;
+                        document.getElementById('stock_quantity').value = data.material.stock_quantity;
+                        document.getElementById('minimum_stock').value = data.material.minimum_stock;
+                    }
+                })
+                .catch(error => {
+                    alert('Error loading material data');
+                });
+        }
     </script>
 </body>
 </html>

@@ -203,6 +203,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $visitId = intval($_POST['visit_id']);
     $patientId = intval($_POST['patient_id']);
     $notes = sanitizeInput($_POST['notes'] ?? '');
+    $numberOfNights = intval($_POST['number_of_nights'] ?? 1);
     
     // Check if bed is available
     $bedCheck = $conn->query("SELECT status FROM beds WHERE bed_id = $bedId");
@@ -216,9 +217,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         
         try {
             // Assign bed
-            $query = "INSERT INTO bed_assignments (bed_id, visit_id, patient_id, notes) VALUES (?, ?, ?, ?)";
+            $query = "INSERT INTO bed_assignments (bed_id, visit_id, patient_id, notes, number_of_nights) VALUES (?, ?, ?, ?, ?)";
             $stmt = $conn->prepare($query);
-            $stmt->bind_param('iiis', $bedId, $visitId, $patientId, $notes);
+            $stmt->bind_param('iiisi', $bedId, $visitId, $patientId, $notes, $numberOfNights);
             $stmt->execute();
             
             // Update bed status
@@ -244,7 +245,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $bedCharge->execute();
             $bedDetails = $bedCharge->get_result()->fetch_assoc();
             $bedPrice = (float) ($bedDetails['price_per_day'] ?: $bedDetails['base_price']);
-            addInvoiceCharge($conn, $visitId, 'IPD bed: ' . $bedDetails['name'] . ' / Bed ' . $bedDetails['bed_number'], 'Bed', 1, $bedPrice);
+            $totalBedCharge = $bedPrice * $numberOfNights;
+            addInvoiceCharge($conn, $visitId, 'IPD bed: ' . $bedDetails['name'] . ' / Bed ' . $bedDetails['bed_number'] . ' (' . $numberOfNights . ' nights)', 'Bed', $numberOfNights, $bedPrice);
 
             $ipdTypeId = getLookupId($conn, 'lookup_visit_types', 'name', 'IPD');
             $ipdDepartmentId = getLookupId($conn, 'lookup_departments', 'code', 'IPD');
@@ -298,6 +300,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $error = 'Failed to assign bed. Please try again.';
         }
     }
+}
+
+// ============================================================================
+// UPDATE NIGHTS (AJAX)
+// ============================================================================
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_nights') {
+    header('Content-Type: application/json');
+    $assignmentId = intval($_POST['assignment_id']);
+    $numberOfNights = intval($_POST['number_of_nights']);
+    
+    if ($numberOfNights < 1) {
+        echo json_encode(['success' => false, 'error' => 'Number of nights must be at least 1']);
+        exit();
+    }
+    
+    $query = "UPDATE bed_assignments SET number_of_nights = ? WHERE assignment_id = ?";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param('ii', $numberOfNights, $assignmentId);
+    
+    if ($stmt->execute()) {
+        logUserActivity($conn, $_SESSION['user_id'], 'Updated Bed Nights', "Updated nights to {$numberOfNights} for assignment ID: {$assignmentId}");
+        echo json_encode(['success' => true]);
+    } else {
+        echo json_encode(['success' => false, 'error' => 'Failed to update nights']);
+    }
+    exit();
 }
 
 // ============================================================================
@@ -1264,6 +1292,7 @@ if (isset($_GET['message'])) {
                                     <th>Visit</th>
                                     <th>Ward</th>
                                     <th>Bed</th>
+                                    <th>Nights</th>
                                     <th>Assigned Date</th>
                                     <th>Actions</th>
                                 </tr>
@@ -1271,7 +1300,7 @@ if (isset($_GET['message'])) {
                             <tbody>
                                 <?php if (empty($assignments)): ?>
                                     <tr>
-                                        <td colspan="6" style="text-align: center; color: #94a3b8; padding: 40px;">
+                                        <td colspan="7" style="text-align: center; color: #94a3b8; padding: 40px;">
                                             <i class="fas fa-bed" style="font-size: 32px; display: block; margin-bottom: 8px;"></i>
                                             No active bed assignments
                                         </td>
@@ -1293,6 +1322,12 @@ if (isset($_GET['message'])) {
                                         <td><?php echo htmlspecialchars($assignment['visit_code']); ?></td>
                                         <td><?php echo htmlspecialchars($assignment['ward_name']); ?></td>
                                         <td><strong><?php echo htmlspecialchars($assignment['bed_number']); ?></strong></td>
+                                        <td>
+                                            <span id="nights_<?php echo $assignment['assignment_id']; ?>"><?php echo $assignment['number_of_nights'] ?? 1; ?></span>
+                                            <button type="button" onclick="editNights(<?php echo $assignment['assignment_id']; ?>, <?php echo $assignment['number_of_nights'] ?? 1; ?>)" style="background: none; border: none; cursor: pointer; margin-left: 4px; color: #2563eb;">
+                                                <i class="fas fa-edit" style="font-size: 12px;"></i>
+                                            </button>
+                                        </td>
                                         <td><?php echo date('M d, Y g:i A', strtotime($assignment['assigned_at'])); ?></td>
                                         <td>
                                             <div class="action-buttons">
@@ -1634,6 +1669,12 @@ if (isset($_GET['message'])) {
                     <label for="notes">Notes</label>
                     <textarea id="notes" name="notes" rows="3" placeholder="Any additional notes about this assignment..."></textarea>
                 </div>
+
+                <div class="form-group">
+                    <label for="number_of_nights">Number of Nights *</label>
+                    <input type="number" id="number_of_nights" name="number_of_nights" min="1" value="1" required>
+                    <small style="color: #64748b;">Total bed charge will be calculated based on this number of nights</small>
+                </div>
                 
                 <div class="btn-group">
                     <button type="submit" class="btn-submit">
@@ -1646,6 +1687,39 @@ if (isset($_GET['message'])) {
     </div>
 
     <script>
+        function editNights(assignmentId, currentNights) {
+            const newNights = prompt('Enter number of nights:', currentNights);
+            if (newNights !== null && newNights !== '') {
+                const nights = parseInt(newNights);
+                if (nights < 1) {
+                    alert('Number of nights must be at least 1');
+                    return;
+                }
+                
+                const formData = new FormData();
+                formData.append('action', 'update_nights');
+                formData.append('assignment_id', assignmentId);
+                formData.append('number_of_nights', nights);
+                
+                fetch('bed_management.php', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('nights_' + assignmentId).textContent = nights;
+                        alert('Nights updated successfully');
+                    } else {
+                        alert('Error: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    alert('Error updating nights');
+                });
+            }
+        }
+
         // Auto-fill patient ID when visit is selected
         document.getElementById('visit_id').addEventListener('change', function() {
             const visitId = this.value;

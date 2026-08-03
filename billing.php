@@ -820,7 +820,7 @@ if (isset($_GET['message'])) {
             </form>
         </div>
     </div>
-    <?php endif; ?>
+    <?php endif; endif; ?>
 
     <!-- Balance Modal -->
     <div id="balanceModal" class="form-modal" style="display: none;">

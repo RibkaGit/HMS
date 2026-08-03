@@ -884,19 +884,38 @@ if (!empty($radiologyOrders)) {
                 <!-- Payment Section -->
                 <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 24px; border: 2px solid #e2e8f0;">
                     <h4 style="margin: 0 0 16px 0; font-size: 16px; font-weight: 600; color: #1e293b;">Payment Method</h4>
-                    <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+                    
+                    <!-- Advance Payment -->
+                    <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 12px;">
                         <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px 16px; background: white; border: 2px solid #e2e8f0; border-radius: 6px;">
-                            <input type="checkbox" name="advance_payment" value="1">
+                            <input type="checkbox" name="advance_payment" id="advance_payment" onchange="toggleAmountField('advance')">
                             <span>Advance Payment</span>
                         </label>
+                        <div id="amountField_advance" style="display: none; flex: 1;">
+                            <input type="number" id="amount_advance" step="0.01" min="0" placeholder="Amount (Birr)" style="width: 100%; padding: 8px; border: 2px solid #e2e8f0; border-radius: 6px;">
+                        </div>
+                    </div>
+                    
+                    <!-- Payment -->
+                    <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 12px;">
                         <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px 16px; background: white; border: 2px solid #e2e8f0; border-radius: 6px;">
-                            <input type="checkbox" name="payment" value="1">
+                            <input type="checkbox" name="payment" id="payment" onchange="toggleAmountField('payment')">
                             <span>Payment</span>
                         </label>
+                        <div id="amountField_payment" style="display: none; flex: 1;">
+                            <input type="number" id="amount_payment" step="0.01" min="0" placeholder="Amount (Birr)" style="width: 100%; padding: 8px; border: 2px solid #e2e8f0; border-radius: 6px;">
+                        </div>
+                    </div>
+                    
+                    <!-- Settlement -->
+                    <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 12px;">
                         <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px 16px; background: white; border: 2px solid #e2e8f0; border-radius: 6px;">
-                            <input type="checkbox" name="settlement" value="1">
+                            <input type="checkbox" name="settlement" id="settlement" onchange="toggleAmountField('settlement')">
                             <span>Settlement</span>
                         </label>
+                        <div id="amountField_settlement" style="display: none; flex: 1;">
+                            <input type="number" id="amount_settlement" step="0.01" min="0" placeholder="Amount (Birr)" style="width: 100%; padding: 8px; border: 2px solid #e2e8f0; border-radius: 6px;">
+                        </div>
                     </div>
                 </div>
 
@@ -1215,6 +1234,19 @@ if (!empty($radiologyOrders)) {
     <?php endif; ?>
 
     <script>
+        function toggleAmountField(type) {
+            const checkbox = document.getElementById(type === 'advance' ? 'advance_payment' : (type === 'payment' ? 'payment' : 'settlement'));
+            const amountField = document.getElementById('amountField_' + type);
+
+            if (checkbox && amountField) {
+                if (checkbox.checked) {
+                    amountField.style.display = 'block';
+                } else {
+                    amountField.style.display = 'none';
+                }
+            }
+        }
+
         function toggleVisitBalance(visitId) {
             const checkbox = document.getElementById('show_balance_' + visitId);
             const url = new URL(window.location.href);

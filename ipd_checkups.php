@@ -158,6 +158,164 @@ if (isset($_GET['action']) && $_GET['action'] === 'delete_checkup' && isset($_GE
     }
 }
 
+// ============================================================================
+// GET CHECKUP (AJAX)
+// ============================================================================
+if (isset($_GET['action']) && $_GET['action'] === 'get_checkup' && isset($_GET['id'])) {
+    header('Content-Type: application/json');
+    $checkupId = intval($_GET['id']);
+    
+    $query = "SELECT * FROM ipd_checkups WHERE checkup_id = ?";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param('i', $checkupId);
+    $stmt->execute();
+    $checkup = $stmt->get_result()->fetch_assoc();
+    
+    if ($checkup) {
+        // Get medicines administered
+        $medQuery = "SELECT ima.*, m.name as medication_name, m.strength, m.unit
+                     FROM ipd_medicine_administration ima
+                     JOIN medications m ON ima.medication_id = m.medication_id
+                     WHERE ima.checkup_id = ?";
+        $medStmt = $conn->prepare($medQuery);
+        $medStmt->bind_param('i', $checkupId);
+        $medStmt->execute();
+        $medicines = $medStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        
+        // Get materials used
+        $matQuery = "SELECT ima.*, m.name as material_name, m.unit
+                     FROM ipd_material_administration ima
+                     JOIN materials m ON ima.material_id = m.material_id
+                     WHERE ima.checkup_id = ?";
+        $matStmt = $conn->prepare($matQuery);
+        $matStmt->bind_param('i', $checkupId);
+        $matStmt->execute();
+        $materials = $matStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        
+        echo json_encode(['success' => true, 'checkup' => $checkup, 'medicines' => $medicines, 'materials' => $materials]);
+    } else {
+        echo json_encode(['success' => false, 'error' => 'Checkup not found']);
+    }
+    exit();
+}
+
+// ============================================================================
+// UPDATE CHECKUP
+// ============================================================================
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_checkup') {
+    $checkupId = intval($_POST['checkup_id']);
+    $visitId = intval($_POST['visit_id']);
+    $patientId = intval($_POST['patient_id']);
+    $recordedBy = intval($_SESSION['user_id']);
+
+    $progressNotes = sanitizeInput($_POST['progress_notes'] ?? '');
+    $glucoseLevel = !empty($_POST['glucose_level']) ? floatval($_POST['glucose_level']) : null;
+    $glucoseUnit = sanitizeInput($_POST['glucose_unit'] ?? 'mg/dL');
+    $glucoseType = sanitizeInput($_POST['glucose_type'] ?? 'Random');
+    $injectionGiven = isset($_POST['injection_given']) ? 1 : 0;
+    $injectionType = sanitizeInput($_POST['injection_type'] ?? '');
+    $injectionDosage = sanitizeInput($_POST['injection_dosage'] ?? '');
+    $medicineGiven = isset($_POST['medicine_given']) ? 1 : 0;
+    $medicineNotes = sanitizeInput($_POST['medicine_notes'] ?? '');
+    $materialGiven = isset($_POST['material_given']) ? 1 : 0;
+    $materialNotes = sanitizeInput($_POST['material_notes'] ?? '');
+    $vitalSigns = sanitizeInput($_POST['vital_signs'] ?? '');
+
+    $checkupQuery = "UPDATE ipd_checkups SET progress_notes = ?, glucose_level = ?, glucose_unit = ?, glucose_type = ?, injection_given = ?, injection_type = ?, injection_dosage = ?, medicine_given = ?, medicine_notes = ?, material_given = ?, material_notes = ?, vital_signs = ? WHERE checkup_id = ?";
+    $checkupStmt = $conn->prepare($checkupQuery);
+    $checkupStmt->bind_param('sdssississsi',
+        $progressNotes,
+        $glucoseLevel,
+        $glucoseUnit,
+        $glucoseType,
+        $injectionGiven,
+        $injectionType,
+        $injectionDosage,
+        $medicineGiven,
+        $medicineNotes,
+        $materialGiven,
+        $materialNotes,
+        $vitalSigns,
+        $checkupId
+    );
+
+    if ($checkupStmt->execute()) {
+        // Delete existing medicine and material administrations
+        $conn->prepare("DELETE FROM ipd_medicine_administration WHERE checkup_id = ?")->bind_param('i', $checkupId)->execute();
+        $conn->prepare("DELETE FROM ipd_material_administration WHERE checkup_id = ?")->bind_param('i', $checkupId)->execute();
+
+        // Handle medicine administration
+        if ($medicineGiven && isset($_POST['medications']) && is_array($_POST['medications'])) {
+            foreach ($_POST['medications'] as $med) {
+                if (!empty($med['medication_id'])) {
+                    $medQuery = "INSERT INTO ipd_medicine_administration (checkup_id, visit_id, medication_id, dosage, quantity, administered_by, notes)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)";
+                    $medStmt = $conn->prepare($medQuery);
+                    $medStmt->bind_param('iiisiis',
+                        $checkupId,
+                        $visitId,
+                        intval($med['medication_id']),
+                        sanitizeInput($med['dosage'] ?? ''),
+                        intval($med['quantity'] ?? 1),
+                        $recordedBy,
+                        sanitizeInput($med['notes'] ?? '')
+                    );
+                    $medStmt->execute();
+                }
+            }
+        }
+
+        // Handle material administration
+        if ($materialGiven && isset($_POST['materials']) && is_array($_POST['materials'])) {
+            foreach ($_POST['materials'] as $mat) {
+                if (!empty($mat['material_id'])) {
+                    $matQuery = "INSERT INTO ipd_material_administration (checkup_id, visit_id, material_id, quantity_used, unit_cost, administered_by, notes)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)";
+                    $matStmt = $conn->prepare($matQuery);
+                    $matStmt->bind_param('iiisiis',
+                        $checkupId,
+                        $visitId,
+                        intval($mat['material_id']),
+                        intval($mat['quantity_used'] ?? 1),
+                        floatval($mat['unit_cost'] ?? 0),
+                        $recordedBy,
+                        sanitizeInput($mat['notes'] ?? '')
+                    );
+                    if ($matStmt->execute()) {
+                        // Update material stock
+                        $updateStockQuery = "UPDATE materials SET stock_quantity = stock_quantity - ? WHERE material_id = ?";
+                        $updateStockStmt = $conn->prepare($updateStockQuery);
+                        $updateStockStmt->bind_param('ii', intval($mat['quantity_used'] ?? 1), intval($mat['material_id']));
+                        $updateStockStmt->execute();
+
+                        // Record material usage
+                        $usageQuery = "INSERT INTO material_usage (visit_id, material_id, quantity_used, unit_cost, total_cost, used_at, used_by)
+                                     VALUES (?, ?, ?, ?, ?, NOW(), ?)";
+                        $usageStmt = $conn->prepare($usageQuery);
+                        $totalCost = (intval($mat['quantity_used'] ?? 1) * floatval($mat['unit_cost'] ?? 0));
+                        $usageStmt->bind_param('iiiddi',
+                            $visitId,
+                            intval($mat['material_id']),
+                            intval($mat['quantity_used'] ?? 1),
+                            floatval($mat['unit_cost'] ?? 0),
+                            $totalCost,
+                            $recordedBy
+                        );
+                        $usageStmt->execute();
+                    }
+                }
+            }
+        }
+
+        logUserActivity($conn, $_SESSION['user_id'], 'Updated IPD Checkup', "Updated checkup ID: {$checkupId} for visit ID: {$visitId}");
+        $message = 'Checkup updated successfully!';
+        header('Location: ipd_checkups.php?visit_id=' . $visitId . '&message=' . urlencode($message));
+        exit();
+    } else {
+        $error = 'Failed to update checkup. Please try again.';
+    }
+}
+
 // Get IPD patients (patients with bed assignments)
 $ipdPatientsQuery = "SELECT v.visit_id, v.visit_code, v.admitted_at,
                      p.patient_id, CONCAT(p.first_name, ' ', p.last_name) as patient_name, p.patient_code,
@@ -560,6 +718,167 @@ if (isset($_GET['message'])) {
                     </form>
                 </div>
 
+                <!-- Edit Checkup Modal -->
+                <div class="form-modal" id="editCheckupModal" style="display: none;">
+                    <div class="form-modal-content" style="max-width: 900px;">
+                        <button class="close-btn" onclick="closeEditCheckupModal()">&times;</button>
+                        <h2 style="margin-bottom: 24px;">Edit Checkup</h2>
+                        <form method="POST" action="" id="editCheckupForm">
+                            <input type="hidden" name="action" value="update_checkup">
+                            <input type="hidden" name="checkup_id" id="edit_checkup_id">
+                            <input type="hidden" name="visit_id" id="edit_visit_id">
+                            <input type="hidden" name="patient_id" id="edit_patient_id">
+
+                            <div class="form-group">
+                                <label for="edit_progress_notes">Progress Notes</label>
+                                <textarea id="edit_progress_notes" name="progress_notes" rows="4" placeholder="Detailed progress notes, observations, and updates..." style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;"></textarea>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="edit_vital_signs">Vital Signs</label>
+                                <textarea id="edit_vital_signs" name="vital_signs" rows="2" placeholder="e.g., BP: 120/80, Pulse: 72, Temp: 98.6°F, SpO2: 98%" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;"></textarea>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group" style="flex: 1;">
+                                    <label for="edit_glucose_level">Glucose Level</label>
+                                    <input type="number" id="edit_glucose_level" name="glucose_level" step="0.1" placeholder="e.g., 120" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                </div>
+                                <div class="form-group" style="flex: 1;">
+                                    <label for="edit_glucose_unit">Unit</label>
+                                    <select id="edit_glucose_unit" name="glucose_unit" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                        <option value="mg/dL">mg/dL</option>
+                                        <option value="mmol/L">mmol/L</option>
+                                    </select>
+                                </div>
+                                <div class="form-group" style="flex: 1;">
+                                    <label for="edit_glucose_type">Type</label>
+                                    <select id="edit_glucose_type" name="glucose_type" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                        <option value="Random">Random</option>
+                                        <option value="Fasting">Fasting</option>
+                                        <option value="Postprandial">Postprandial</option>
+                                        <option value="HbA1c">HbA1c</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="background: #fef2f2; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
+                                <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                                    <input type="checkbox" name="injection_given" value="1" id="edit_injection_given" onchange="toggleEditInjectionFields()">
+                                    <strong>Injection Given</strong>
+                                </label>
+                                <div id="edit_injection_fields" style="display: none; margin-top: 12px;">
+                                    <div class="form-row">
+                                        <div class="form-group" style="flex: 1;">
+                                            <label for="edit_injection_type">Injection Type</label>
+                                            <input type="text" id="edit_injection_type" name="injection_type" placeholder="e.g., Insulin, Antibiotic" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                        </div>
+                                        <div class="form-group" style="flex: 1;">
+                                            <label for="edit_injection_dosage">Dosage</label>
+                                            <input type="text" id="edit_injection_dosage" name="injection_dosage" placeholder="e.g., 10 units, 500mg" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="background: #f0fdf4; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
+                                <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                                    <input type="checkbox" name="medicine_given" value="1" id="edit_medicine_given" onchange="toggleEditMedicineFields()">
+                                    <strong>Medicine Administered</strong>
+                                </label>
+                                <div id="edit_medicine_fields" style="display: none; margin-top: 12px;">
+                                    <div id="edit_medication_container">
+                                        <div class="form-row" style="margin-bottom: 12px;">
+                                            <div class="form-group" style="flex: 2;">
+                                                <label>Medication</label>
+                                                <select name="medications[0][medication_id]" required style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                                    <option value="">Select medication...</option>
+                                                    <?php foreach ($medications as $med): ?>
+                                                        <option value="<?php echo $med['medication_id']; ?>">
+                                                            <?php echo htmlspecialchars($med['name'] . ' ' . $med['strength'] . ' ' . $med['unit']); ?> (Stock: <?php echo $med['stock_quantity']; ?>)
+                                                        </option>
+                                                    <?php endforeach; ?>
+                                                </select>
+                                            </div>
+                                            <div class="form-group" style="flex: 1;">
+                                                <label>Dosage</label>
+                                                <input type="text" name="medications[0][dosage]" placeholder="e.g., 500mg" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                            </div>
+                                            <div class="form-group" style="flex: 1;">
+                                                <label>Quantity</label>
+                                                <input type="number" name="medications[0][quantity]" min="1" value="1" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                            </div>
+                                            <div class="form-group" style="flex: 2;">
+                                                <label>Notes</label>
+                                                <input type="text" name="medications[0][notes]" placeholder="Optional notes" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button type="button" onclick="addEditMedicationRow()" class="btn-cancel" style="margin-top: 8px; width: 100%; border-style: dashed;">
+                                        <i class="fas fa-plus"></i> Add Another Medication
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="edit_medicine_notes">General Medicine Notes</label>
+                                <textarea id="edit_medicine_notes" name="medicine_notes" rows="2" placeholder="Additional notes about medication administration..." style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;"></textarea>
+                            </div>
+
+                            <div class="form-group" style="background: #fef3c7; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
+                                <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                                    <input type="checkbox" name="material_given" value="1" id="edit_material_given" onchange="toggleEditMaterialFields()">
+                                    <strong>Material Used</strong>
+                                </label>
+                                <div id="edit_material_fields" style="display: none; margin-top: 12px;">
+                                    <div id="edit_material_container">
+                                        <div class="form-row" style="margin-bottom: 12px;">
+                                            <div class="form-group" style="flex: 2;">
+                                                <label>Material</label>
+                                                <select name="materials[0][material_id]" required style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                                    <option value="">Select material...</option>
+                                                    <?php foreach ($materials as $mat): ?>
+                                                        <option value="<?php echo $mat['material_id']; ?>" data-unit-cost="<?php echo $mat['unit_price']; ?>">
+                                                            <?php echo htmlspecialchars($mat['name']); ?> (Stock: <?php echo $mat['stock_quantity']; ?>)
+                                                        </option>
+                                                    <?php endforeach; ?>
+                                                </select>
+                                            </div>
+                                            <div class="form-group" style="flex: 1;">
+                                                <label>Quantity</label>
+                                                <input type="number" name="materials[0][quantity_used]" min="1" value="1" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                            </div>
+                                            <div class="form-group" style="flex: 1;">
+                                                <label>Unit Cost</label>
+                                                <input type="number" name="materials[0][unit_cost]" step="0.01" placeholder="0.00" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                            </div>
+                                            <div class="form-group" style="flex: 2;">
+                                                <label>Notes</label>
+                                                <input type="text" name="materials[0][notes]" placeholder="Optional notes" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button type="button" onclick="addEditMaterialRow()" class="btn-cancel" style="margin-top: 8px; width: 100%; border-style: dashed;">
+                                        <i class="fas fa-plus"></i> Add Another Material
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="edit_material_notes">General Material Notes</label>
+                                <textarea id="edit_material_notes" name="material_notes" rows="2" placeholder="Additional notes about material usage..." style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;"></textarea>
+                            </div>
+
+                            <div class="btn-group">
+                                <button type="submit" class="btn-submit">
+                                    <i class="fas fa-save"></i> Update Checkup
+                                </button>
+                                <button type="button" class="btn-cancel" onclick="closeEditCheckupModal()">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
                 <div class="table-card">
                     <h2 style="margin-bottom: 20px;">Checkup History</h2>
                     <?php if (empty($checkups)): ?>
@@ -575,9 +894,14 @@ if (isset($_GET['message'])) {
                                         <strong><?php echo htmlspecialchars($checkup['recorded_by_name']); ?></strong>
                                         <span class="checkup-time"><?php echo date('M d, Y g:i A', strtotime($checkup['checkup_time'])); ?></span>
                                     </div>
-                                    <a href="ipd_checkups.php?action=delete_checkup&id=<?php echo $checkup['checkup_id']; ?>&visit_id=<?php echo $selectedVisitId; ?>" class="btn-delete" onclick="return confirm('Are you sure you want to delete this checkup?');" style="padding: 4px 8px; font-size: 12px;">
-                                        <i class="fas fa-trash"></i> Delete
-                                    </a>
+                                    <div class="action-buttons">
+                                        <button type="button" class="btn-edit" onclick="editCheckup(<?php echo $checkup['checkup_id']; ?>)" style="padding: 4px 8px; font-size: 12px;">
+                                            <i class="fas fa-edit"></i> Edit
+                                        </button>
+                                        <a href="ipd_checkups.php?action=delete_checkup&id=<?php echo $checkup['checkup_id']; ?>&visit_id=<?php echo $selectedVisitId; ?>" class="btn-delete" onclick="return confirm('Are you sure you want to delete this checkup?');" style="padding: 4px 8px; font-size: 12px;">
+                                            <i class="fas fa-trash"></i> Delete
+                                        </a>
+                                    </div>
                                 </div>
 
                                 <?php if ($checkup['progress_notes']): ?>
@@ -673,6 +997,8 @@ if (isset($_GET['message'])) {
     <script>
         let medicationCount = 0;
         let materialCount = 0;
+        let editMedicationCount = 0;
+        let editMaterialCount = 0;
 
         function toggleInjectionFields() {
             const checkbox = document.getElementById('injection_given');
@@ -690,6 +1016,181 @@ if (isset($_GET['message'])) {
             const checkbox = document.getElementById('material_given');
             const fields = document.getElementById('material_fields');
             fields.style.display = checkbox.checked ? 'block' : 'none';
+        }
+
+        function toggleEditInjectionFields() {
+            const checkbox = document.getElementById('edit_injection_given');
+            const fields = document.getElementById('edit_injection_fields');
+            fields.style.display = checkbox.checked ? 'block' : 'none';
+        }
+
+        function toggleEditMedicineFields() {
+            const checkbox = document.getElementById('edit_medicine_given');
+            const fields = document.getElementById('edit_medicine_fields');
+            fields.style.display = checkbox.checked ? 'block' : 'none';
+        }
+
+        function toggleEditMaterialFields() {
+            const checkbox = document.getElementById('edit_material_given');
+            const fields = document.getElementById('edit_material_fields');
+            fields.style.display = checkbox.checked ? 'block' : 'none';
+        }
+
+        function editCheckup(checkupId) {
+            fetch('ipd_checkups.php?action=get_checkup&id=' + checkupId)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('editCheckupModal').style.display = 'flex';
+                        document.getElementById('edit_checkup_id').value = checkupId;
+                        document.getElementById('edit_visit_id').value = data.checkup.visit_id;
+                        document.getElementById('edit_patient_id').value = data.checkup.patient_id;
+                        
+                        document.getElementById('edit_progress_notes').value = data.checkup.progress_notes || '';
+                        document.getElementById('edit_vital_signs').value = data.checkup.vital_signs || '';
+                        document.getElementById('edit_glucose_level').value = data.checkup.glucose_level || '';
+                        document.getElementById('edit_glucose_unit').value = data.checkup.glucose_unit || 'mg/dL';
+                        document.getElementById('edit_glucose_type').value = data.checkup.glucose_type || 'Random';
+                        
+                        document.getElementById('edit_injection_given').checked = data.checkup.injection_given == 1;
+                        document.getElementById('edit_injection_type').value = data.checkup.injection_type || '';
+                        document.getElementById('edit_injection_dosage').value = data.checkup.injection_dosage || '';
+                        toggleEditInjectionFields();
+                        
+                        document.getElementById('edit_medicine_given').checked = data.checkup.medicine_given == 1;
+                        document.getElementById('edit_medicine_notes').value = data.checkup.medicine_notes || '';
+                        toggleEditMedicineFields();
+                        
+                        document.getElementById('edit_material_given').checked = data.checkup.material_given == 1;
+                        document.getElementById('edit_material_notes').value = data.checkup.material_notes || '';
+                        toggleEditMaterialFields();
+                        
+                        // Load existing medicines
+                        const medContainer = document.getElementById('edit_medication_container');
+                        medContainer.innerHTML = '';
+                        editMedicationCount = 0;
+                        
+                        if (data.medicines && data.medicines.length > 0) {
+                            data.medicines.forEach((med, index) => {
+                                addEditMedicationRow(med);
+                            });
+                        } else {
+                            addEditMedicationRow();
+                        }
+                        
+                        // Load existing materials
+                        const matContainer = document.getElementById('edit_material_container');
+                        matContainer.innerHTML = '';
+                        editMaterialCount = 0;
+                        
+                        if (data.materials && data.materials.length > 0) {
+                            data.materials.forEach((mat, index) => {
+                                addEditMaterialRow(mat);
+                            });
+                        } else {
+                            addEditMaterialRow();
+                        }
+                    }
+                })
+                .catch(error => {
+                    alert('Error loading checkup data');
+                });
+        }
+
+        function closeEditCheckupModal() {
+            document.getElementById('editCheckupModal').style.display = 'none';
+        }
+
+        function addEditMedicationRow(existingMed = null) {
+            const container = document.getElementById('edit_medication_container');
+            const newRow = document.createElement('div');
+            newRow.className = 'form-row';
+            newRow.style.marginBottom = '12px';
+            
+            const medValue = existingMed ? existingMed.medication_id : '';
+            const dosageValue = existingMed ? existingMed.dosage : '';
+            const quantityValue = existingMed ? existingMed.quantity : 1;
+            const notesValue = existingMed ? existingMed.notes : '';
+            
+            newRow.innerHTML = `
+                <div class="form-group" style="flex: 2;">
+                    <label>Medication</label>
+                    <select name="medications[${editMedicationCount}][medication_id]" required style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                        <option value="">Select medication...</option>
+                        <?php foreach ($medications as $med): ?>
+                            <option value="<?php echo $med['medication_id']; ?>" ${medValue === <?php echo $med['medication_id']; ?> ? 'selected' : ''}>
+                                <?php echo htmlspecialchars($med['name'] . ' ' . $med['strength'] . ' ' . $med['unit']); ?> (Stock: <?php echo $med['stock_quantity']; ?>)
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="form-group" style="flex: 1;">
+                    <label>Dosage</label>
+                    <input type="text" name="medications[${editMedicationCount}][dosage]" value="${dosageValue}" placeholder="e.g., 500mg" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                </div>
+                <div class="form-group" style="flex: 1;">
+                    <label>Quantity</label>
+                    <input type="number" name="medications[${editMedicationCount}][quantity]" min="1" value="${quantityValue}" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                </div>
+                <div class="form-group" style="flex: 2;">
+                    <label>Notes</label>
+                    <input type="text" name="medications[${editMedicationCount}][notes]" value="${notesValue}" placeholder="Optional notes" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                </div>
+                <div class="form-group" style="flex: 0;">
+                    <label>&nbsp;</label>
+                    <button type="button" onclick="this.closest('.form-row').remove()" class="btn-delete" style="padding: 8px 12px;">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            `;
+            container.appendChild(newRow);
+            editMedicationCount++;
+        }
+
+        function addEditMaterialRow(existingMat = null) {
+            const container = document.getElementById('edit_material_container');
+            const newRow = document.createElement('div');
+            newRow.className = 'form-row';
+            newRow.style.marginBottom = '12px';
+            
+            const matValue = existingMat ? existingMat.material_id : '';
+            const quantityValue = existingMat ? existingMat.quantity_used : 1;
+            const costValue = existingMat ? existingMat.unit_cost : '';
+            const notesValue = existingMat ? existingMat.notes : '';
+            
+            newRow.innerHTML = `
+                <div class="form-group" style="flex: 2;">
+                    <label>Material</label>
+                    <select name="materials[${editMaterialCount}][material_id]" required style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                        <option value="">Select material...</option>
+                        <?php foreach ($materials as $mat): ?>
+                            <option value="<?php echo $mat['material_id']; ?>" data-unit-cost="<?php echo $mat['unit_price']; ?>" ${matValue === <?php echo $mat['material_id']; ?> ? 'selected' : ''}>
+                                <?php echo htmlspecialchars($mat['name']); ?> (Stock: <?php echo $mat['stock_quantity']; ?>)
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="form-group" style="flex: 1;">
+                    <label>Quantity</label>
+                    <input type="number" name="materials[${editMaterialCount}][quantity_used]" min="1" value="${quantityValue}" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                </div>
+                <div class="form-group" style="flex: 1;">
+                    <label>Unit Cost</label>
+                    <input type="number" name="materials[${editMaterialCount}][unit_cost]" step="0.01" value="${costValue}" placeholder="0.00" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                </div>
+                <div class="form-group" style="flex: 2;">
+                    <label>Notes</label>
+                    <input type="text" name="materials[${editMaterialCount}][notes]" value="${notesValue}" placeholder="Optional notes" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                </div>
+                <div class="form-group" style="flex: 0;">
+                    <label>&nbsp;</label>
+                    <button type="button" onclick="this.closest('.form-row').remove()" class="btn-delete" style="padding: 8px 12px;">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            `;
+            container.appendChild(newRow);
+            editMaterialCount++;
         }
 
         function addMedicationRow() {

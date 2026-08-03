@@ -21,14 +21,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $description = $_POST['description'];
     $unit = $_POST['unit'];
     $unitPrice = floatval($_POST['unit_price']);
-    $stockQuantity = intval($_POST['stock_quantity']);
-    $minimumStock = intval($_POST['minimum_stock']);
     $category = $_POST['category'];
 
-    $query = "INSERT INTO materials (name, description, unit, unit_price, stock_quantity, minimum_stock, category) 
-              VALUES (?, ?, ?, ?, ?, ?, ?)";
+    $query = "INSERT INTO lookup_materials (name, description, unit, unit_price, category, is_active) 
+              VALUES (?, ?, ?, ?, ?, 1)";
     $stmt = $conn->prepare($query);
-    $stmt->bind_param('sssdiss', $name, $description, $unit, $unitPrice, $stockQuantity, $minimumStock, $category);
+    $stmt->bind_param('ssdsd', $name, $description, $unit, $unitPrice, $category);
 
     if ($stmt->execute()) {
         logUserActivity($conn, $_SESSION['user_id'], 'Created Material', "Created material: {$name}");
@@ -47,14 +45,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $description = $_POST['description'];
     $unit = $_POST['unit'];
     $unitPrice = floatval($_POST['unit_price']);
-    $stockQuantity = intval($_POST['stock_quantity']);
-    $minimumStock = intval($_POST['minimum_stock']);
     $category = $_POST['category'];
 
-    $query = "UPDATE materials SET name = ?, description = ?, unit = ?, unit_price = ?, stock_quantity = ?, minimum_stock = ?, category = ? 
+    $query = "UPDATE lookup_materials SET name = ?, description = ?, unit = ?, unit_price = ?, category = ? 
               WHERE material_id = ?";
     $stmt = $conn->prepare($query);
-    $stmt->bind_param('sssdissi', $name, $description, $unit, $unitPrice, $stockQuantity, $minimumStock, $category, $materialId);
+    $stmt->bind_param('ssdsdi', $name, $description, $unit, $unitPrice, $category, $materialId);
 
     if ($stmt->execute()) {
         logUserActivity($conn, $_SESSION['user_id'], 'Updated Material', "Updated material ID: {$materialId}");
@@ -70,7 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 if (isset($_GET['action']) && $_GET['action'] === 'delete_material' && isset($_GET['id'])) {
     $materialId = intval($_GET['id']);
 
-    $query = "UPDATE materials SET is_active = 0 WHERE material_id = ?";
+    $query = "UPDATE lookup_materials SET is_active = 0 WHERE material_id = ?";
     $stmt = $conn->prepare($query);
     $stmt->bind_param('i', $materialId);
 
@@ -91,7 +87,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_material' && isset($_GET[
     header('Content-Type: application/json');
     $materialId = intval($_GET['id']);
     
-    $query = "SELECT * FROM materials WHERE material_id = ?";
+    $query = "SELECT * FROM lookup_materials WHERE material_id = ?";
     $stmt = $conn->prepare($query);
     $stmt->bind_param('i', $materialId);
     $stmt->execute();
@@ -106,28 +102,28 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_material' && isset($_GET[
 }
 
 // ============================================================================
-// RESTOCK MATERIAL
+// RESTOCK MATERIAL (Not applicable for lookup table - removed)
 // ============================================================================
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'restock_material') {
-    $materialId = intval($_POST['material_id']);
-    $quantityToAdd = intval($_POST['quantity_to_add']);
 
-    $query = "UPDATE materials SET stock_quantity = stock_quantity + ? WHERE material_id = ?";
-    $stmt = $conn->prepare($query);
-    $stmt->bind_param('ii', $quantityToAdd, $materialId);
-
-    if ($stmt->execute()) {
-        logUserActivity($conn, $_SESSION['user_id'], 'Restocked Material', "Restocked material ID: {$materialId} with {$quantityToAdd} units");
-        $message = 'Material restocked successfully!';
-    } else {
-        $error = 'Failed to restock material.';
-    }
-}
 
 // ============================================================================
-// FETCH MATERIALS
+// ENSURE LOOKUP_MATERIALS TABLE EXISTS
 // ============================================================================
-$materialsQuery = "SELECT * FROM materials WHERE is_active = 1 ORDER BY name ASC";
+$conn->query("CREATE TABLE IF NOT EXISTS lookup_materials (
+    material_id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    unit VARCHAR(50) NOT NULL,
+    unit_price DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    category VARCHAR(100),
+    is_active TINYINT(1) DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)");
+
+// ============================================================================
+// FETCH MATERIALS FROM LOOKUP TABLE
+// ============================================================================
+$materialsQuery = "SELECT * FROM lookup_materials WHERE is_active = 1 ORDER BY name ASC";
 $materialsResult = $conn->query($materialsQuery);
 $materials = $materialsResult ? $materialsResult->fetch_all(MYSQLI_ASSOC) : [];
 
@@ -136,26 +132,26 @@ $materials = $materialsResult ? $materialsResult->fetch_all(MYSQLI_ASSOC) : [];
 // ============================================================================
 if (empty($materials)) {
     $sampleMaterials = [
-        ['Surgical Gloves', 'Disposable latex surgical gloves, size M', 'pair', 5.00, 500, 50, 'Surgical'],
-        ['Surgical Masks', 'Medical grade disposable face masks', 'piece', 2.50, 1000, 100, 'Surgical'],
-        ['Sterile Gauze Pads', '4x4 inch sterile gauze pads', 'piece', 1.50, 800, 80, 'General'],
-        ['Alcohol Swabs', '70% isopropyl alcohol swabs', 'piece', 0.50, 2000, 200, 'General'],
-        ['Syringes 5ml', 'Disposable syringes with needle, 5ml', 'piece', 3.00, 600, 60, 'Surgical'],
-        ['IV Catheter 20G', 'Intravenous catheter, 20 gauge', 'piece', 8.00, 300, 30, 'Surgical'],
-        ['Blood Collection Tubes', 'Vacutainer blood collection tubes, EDTA', 'piece', 1.00, 1500, 150, 'Lab'],
-        ['Thermometer Digital', 'Digital medical thermometer', 'piece', 15.00, 50, 10, 'Equipment'],
-        ['Blood Pressure Cuff', 'Adult size blood pressure cuff', 'piece', 25.00, 30, 5, 'Equipment'],
-        ['Bandage Roll', 'Cotton elastic bandage roll, 4 inch', 'roll', 4.00, 400, 40, 'General'],
-        ['Antiseptic Solution', 'Povidone-iodine antiseptic solution 500ml', 'bottle', 12.00, 100, 20, 'General'],
-        ['Sutures Absorbable', 'Absorbable surgical sutures, 3-0', 'pack', 45.00, 50, 10, 'Surgical']
+        ['Surgical Gloves', 'Disposable latex surgical gloves, size M', 'pair', 5.00, 'Surgical'],
+        ['Surgical Masks', 'Medical grade disposable face masks', 'piece', 2.50, 'Surgical'],
+        ['Sterile Gauze Pads', '4x4 inch sterile gauze pads', 'piece', 1.50, 'General'],
+        ['Alcohol Swabs', '70% isopropyl alcohol swabs', 'piece', 0.50, 'General'],
+        ['Syringes 5ml', 'Disposable syringes with needle, 5ml', 'piece', 3.00, 'Surgical'],
+        ['IV Catheter 20G', 'Intravenous catheter, 20 gauge', 'piece', 8.00, 'Surgical'],
+        ['Blood Collection Tubes', 'Vacutainer blood collection tubes, EDTA', 'piece', 1.00, 'Lab'],
+        ['Thermometer Digital', 'Digital medical thermometer', 'piece', 15.00, 'Equipment'],
+        ['Blood Pressure Cuff', 'Adult size blood pressure cuff', 'piece', 25.00, 'Equipment'],
+        ['Bandage Roll', 'Cotton elastic bandage roll, 4 inch', 'roll', 4.00, 'General'],
+        ['Antiseptic Solution', 'Povidone-iodine antiseptic solution 500ml', 'bottle', 12.00, 'General'],
+        ['Sutures Absorbable', 'Absorbable surgical sutures, 3-0', 'pack', 45.00, 'Surgical']
     ];
 
     foreach ($sampleMaterials as $m) {
-        $query = "INSERT INTO materials (name, description, unit, unit_price, stock_quantity, minimum_stock, category, is_active) 
-                  VALUES (?, ?, ?, ?, ?, ?, ?, 1)";
+        $query = "INSERT INTO lookup_materials (name, description, unit, unit_price, category, is_active) 
+                  VALUES (?, ?, ?, ?, ?, 1)";
         $stmt = $conn->prepare($query);
         if ($stmt) {
-            $stmt->bind_param('sssdiss', $m[0], $m[1], $m[2], $m[3], $m[4], $m[5], $m[6]);
+            $stmt->bind_param('ssdsd', $m[0], $m[1], $m[2], $m[3], $m[4]);
             $stmt->execute();
         }
     }
@@ -169,17 +165,12 @@ if (empty($materials)) {
 $editMaterial = null;
 if (isset($_GET['action']) && $_GET['action'] === 'edit_material' && isset($_GET['id'])) {
     $materialId = intval($_GET['id']);
-    $query = "SELECT * FROM materials WHERE material_id = ?";
+    $query = "SELECT * FROM lookup_materials WHERE material_id = ?";
     $stmt = $conn->prepare($query);
     $stmt->bind_param('i', $materialId);
     $stmt->execute();
     $editMaterial = $stmt->get_result()->fetch_assoc();
 }
-
-// Get low stock materials
-$lowStockQuery = "SELECT * FROM materials WHERE is_active = 1 AND stock_quantity <= minimum_stock ORDER BY stock_quantity ASC";
-$lowStockResult = $conn->query($lowStockQuery);
-$lowStockMaterials = $lowStockResult ? $lowStockResult->fetch_all(MYSQLI_ASSOC) : [];
 
 if (isset($_GET['message'])) {
     $message = urldecode($_GET['message']);
@@ -351,12 +342,6 @@ if (isset($_GET['message'])) {
                 <div class="alert alert-error"><?php echo htmlspecialchars($error); ?></div>
             <?php endif; ?>
 
-            <?php if (!empty($lowStockMaterials)): ?>
-            <div class="low-stock-alert">
-                <i class="fas fa-exclamation-triangle"></i>
-                <strong>Low Stock Alert:</strong> <?php echo count($lowStockMaterials); ?> items need restocking
-            </div>
-            <?php endif; ?>
 
             <div class="table-card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -374,15 +359,13 @@ if (isset($_GET['message'])) {
                                 <th>Category</th>
                                 <th>Unit</th>
                                 <th>Unit Price</th>
-                                <th>Stock</th>
-                                <th>Status</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php if (empty($materials)): ?>
                                 <tr>
-                                    <td colspan="7" style="text-align: center; color: #94a3b8; padding: 40px;">
+                                    <td colspan="5" style="text-align: center; color: #94a3b8; padding: 40px;">
                                         <i class="fas fa-boxes" style="font-size: 32px; display: block; margin-bottom: 8px;"></i>
                                         No materials found
                                     </td>
@@ -399,26 +382,6 @@ if (isset($_GET['message'])) {
                                     <td><?php echo htmlspecialchars($material['category'] ?? 'N/A'); ?></td>
                                     <td><?php echo htmlspecialchars($material['unit']); ?></td>
                                     <td>$<?php echo number_format($material['unit_price'], 2); ?></td>
-                                    <td>
-                                        <?php echo $material['stock_quantity']; ?>
-                                        <?php if ($material['minimum_stock'] > 0): ?>
-                                        <small style="color: #64748b;">(Min: <?php echo $material['minimum_stock']; ?>)</small>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td>
-                                        <?php
-                                        $stockStatus = 'stock-ok';
-                                        $stockText = 'In Stock';
-                                        if ($material['stock_quantity'] == 0) {
-                                            $stockStatus = 'stock-critical';
-                                            $stockText = 'Out of Stock';
-                                        } elseif ($material['stock_quantity'] <= $material['minimum_stock']) {
-                                            $stockStatus = 'stock-low';
-                                            $stockText = 'Low Stock';
-                                        }
-                                        ?>
-                                        <span class="stock-badge <?php echo $stockStatus; ?>"><?php echo $stockText; ?></span>
-                                    </td>
                                     <td>
                                         <div class="action-buttons">
                                             <button type="button" class="btn-edit" onclick="editMaterial(<?php echo $material['material_id']; ?>)">
@@ -470,20 +433,9 @@ if (isset($_GET['message'])) {
                     </div>
                 </div>
 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="unit_price">Unit Price *</label>
-                        <input type="number" id="unit_price" name="unit_price" step="0.01" min="0" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="stock_quantity">Stock Quantity *</label>
-                        <input type="number" id="stock_quantity" name="stock_quantity" min="0" required>
-                    </div>
-                </div>
-
                 <div class="form-group">
-                    <label for="minimum_stock">Minimum Stock Alert Level</label>
-                    <input type="number" id="minimum_stock" name="minimum_stock" min="0" value="10">
+                    <label for="unit_price">Unit Price *</label>
+                    <input type="number" id="unit_price" name="unit_price" step="0.01" min="0" required>
                 </div>
 
                 <div class="btn-group">
@@ -531,8 +483,6 @@ if (isset($_GET['message'])) {
                         document.getElementById('unit').value = data.material.unit;
                         document.getElementById('category').value = data.material.category || '';
                         document.getElementById('unit_price').value = data.material.unit_price;
-                        document.getElementById('stock_quantity').value = data.material.stock_quantity;
-                        document.getElementById('minimum_stock').value = data.material.minimum_stock;
                     }
                 })
                 .catch(error => {

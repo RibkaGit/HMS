@@ -162,38 +162,35 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_balance' && isset($_GET['
         <h4 style="margin: 0 0 16px 0; font-size: 16px; font-weight: 600; color: #1e293b;">Payment Method</h4>
         
         <!-- Advance Payment -->
-        <div style="margin-bottom: 12px;">
+        <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 12px;">
             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px 16px; background: white; border: 2px solid #e2e8f0; border-radius: 6px;">
-                <input type="checkbox" name="payment_advance" id="payment_advance">
+                <input type="checkbox" name="payment_advance" id="payment_advance" onchange="toggleAmountField('advance')">
                 <span>Advance Payment</span>
             </label>
-            <div id="amountField_advance" style="margin-top: 8px; display: none;">
-                <label style="display: block; margin-bottom: 4px; font-weight: 500; color: #475569; font-size: 13px;">Amount (Birr)</label>
-                <input type="number" id="amount_advance" step="0.01" min="0" placeholder="Enter advance amount" style="width: 100%; padding: 8px; border: 2px solid #e2e8f0; border-radius: 6px;">
+            <div id="amountField_advance" style="display: none; flex: 1;">
+                <input type="number" id="amount_advance" step="0.01" min="0" placeholder="Amount (Birr)" style="width: 100%; padding: 8px; border: 2px solid #e2e8f0; border-radius: 6px;">
             </div>
         </div>
         
         <!-- Payment -->
-        <div style="margin-bottom: 12px;">
+        <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 12px;">
             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px 16px; background: white; border: 2px solid #e2e8f0; border-radius: 6px;">
-                <input type="checkbox" name="payment_payment" id="payment_payment">
+                <input type="checkbox" name="payment_payment" id="payment_payment" onchange="toggleAmountField('payment')">
                 <span>Payment</span>
             </label>
-            <div id="amountField_payment" style="margin-top: 8px; display: none;">
-                <label style="display: block; margin-bottom: 4px; font-weight: 500; color: #475569; font-size: 13px;">Amount (Birr)</label>
-                <input type="number" id="amount_payment" step="0.01" min="0" placeholder="Enter payment amount" style="width: 100%; padding: 8px; border: 2px solid #e2e8f0; border-radius: 6px;">
+            <div id="amountField_payment" style="display: none; flex: 1;">
+                <input type="number" id="amount_payment" step="0.01" min="0" placeholder="Amount (Birr)" style="width: 100%; padding: 8px; border: 2px solid #e2e8f0; border-radius: 6px;">
             </div>
         </div>
         
         <!-- Settlement -->
-        <div style="margin-bottom: 12px;">
+        <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 12px;">
             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px 16px; background: white; border: 2px solid #e2e8f0; border-radius: 6px;">
-                <input type="checkbox" name="payment_settlement" id="payment_settlement">
+                <input type="checkbox" name="payment_settlement" id="payment_settlement" onchange="toggleAmountField('settlement')">
                 <span>Settlement</span>
             </label>
-            <div id="amountField_settlement" style="margin-top: 8px; display: none;">
-                <label style="display: block; margin-bottom: 4px; font-weight: 500; color: #475569; font-size: 13px;">Amount (Birr)</label>
-                <input type="number" id="amount_settlement" step="0.01" min="0" placeholder="Enter settlement amount" style="width: 100%; padding: 8px; border: 2px solid #e2e8f0; border-radius: 6px;">
+            <div id="amountField_settlement" style="display: none; flex: 1;">
+                <input type="number" id="amount_settlement" step="0.01" min="0" placeholder="Amount (Birr)" style="width: 100%; padding: 8px; border: 2px solid #e2e8f0; border-radius: 6px;">
             </div>
         </div>
         

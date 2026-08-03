@@ -164,7 +164,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_balance' && isset($_GET['
         <!-- Advance Payment -->
         <div style="margin-bottom: 12px;">
             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px 16px; background: white; border: 2px solid #e2e8f0; border-radius: 6px;">
-                <input type="checkbox" name="payment_advance" id="payment_advance" onclick="toggleAmountField('advance')">
+                <input type="checkbox" name="payment_advance" id="payment_advance">
                 <span>Advance Payment</span>
             </label>
             <div id="amountField_advance" style="margin-top: 8px; display: none;">
@@ -176,7 +176,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_balance' && isset($_GET['
         <!-- Payment -->
         <div style="margin-bottom: 12px;">
             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px 16px; background: white; border: 2px solid #e2e8f0; border-radius: 6px;">
-                <input type="checkbox" name="payment_payment" id="payment_payment" onclick="toggleAmountField('payment')">
+                <input type="checkbox" name="payment_payment" id="payment_payment">
                 <span>Payment</span>
             </label>
             <div id="amountField_payment" style="margin-top: 8px; display: none;">
@@ -188,7 +188,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_balance' && isset($_GET['
         <!-- Settlement -->
         <div style="margin-bottom: 12px;">
             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px 16px; background: white; border: 2px solid #e2e8f0; border-radius: 6px;">
-                <input type="checkbox" name="payment_settlement" id="payment_settlement" onclick="toggleAmountField('settlement')">
+                <input type="checkbox" name="payment_settlement" id="payment_settlement">
                 <span>Settlement</span>
             </label>
             <div id="amountField_settlement" style="margin-top: 8px; display: none;">
@@ -386,6 +386,29 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_balance' && isset($_GET['
                 });
             });
         };
+
+        // Add event listeners for checkboxes after content loads
+        setTimeout(function() {
+            const advanceCheckbox = document.getElementById('payment_advance');
+            const paymentCheckbox = document.getElementById('payment_payment');
+            const settlementCheckbox = document.getElementById('payment_settlement');
+            
+            if (advanceCheckbox) {
+                advanceCheckbox.addEventListener('change', function() {
+                    toggleAmountField('advance');
+                });
+            }
+            if (paymentCheckbox) {
+                paymentCheckbox.addEventListener('change', function() {
+                    toggleAmountField('payment');
+                });
+            }
+            if (settlementCheckbox) {
+                settlementCheckbox.addEventListener('change', function() {
+                    toggleAmountField('settlement');
+                });
+            }
+        }, 100);
     </script>
     <?php
     echo ob_get_clean();

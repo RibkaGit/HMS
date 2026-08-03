@@ -986,155 +986,11 @@ if (!empty($labOrders)) {
                                             <a href="lab.php?action=view_grouped&visit_id=<?php echo $group['visit_id']; ?>" class="btn-result">
                                                 <i class="fas fa-eye"></i> View & Add Results
                                             </a>
-                                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 4px 10px; border-radius: 4px; background: #f3e8ff; color: #7c3aed; font-size: 12px; font-weight: 500; border: 1px solid #d8b4fe;">
-                                                <input type="checkbox" name="show_balance_<?php echo $group['visit_id']; ?>" id="show_balance_<?php echo $group['visit_id']; ?>" onchange="toggleVisitBalance(<?php echo $group['visit_id']; ?>)" <?php echo isset($_GET['show_balance_visit']) && $_GET['show_balance_visit'] == $group['visit_id'] ? 'checked' : ''; ?>>
-                                                Balance
-                                            </label>
                                         </div>
                                     </td>
                                 </tr>
                                 <?php endforeach; ?>
                             <?php endif; ?>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            <?php endif; ?>
-
-            <?php if (isset($_GET['show_balance_visit']) && $_GET['show_balance_visit']): ?>
-            <?php
-            $selectedBalanceVisitId = intval($_GET['show_balance_visit']);
-            $visitInfoQuery = "SELECT v.visit_code, CONCAT(p.first_name, ' ', p.last_name) as patient_name, p.patient_code
-                              FROM visits v JOIN patients p ON v.patient_id = p.patient_id WHERE v.visit_id = ?";
-            $visitStmt = $conn->prepare($visitInfoQuery);
-            $visitStmt->bind_param('i', $selectedBalanceVisitId);
-            $visitStmt->execute();
-            $visitInfo = $visitStmt->get_result()->fetch_assoc();
-
-            $labCost = 0;
-            $labQuery = "SELECT lo.*, lt.price, lt.name as test_name FROM lab_orders lo JOIN lookup_test_types lt ON lo.test_type_id = lt.test_type_id WHERE lo.visit_id = ?";
-            $labStmt = $conn->prepare($labQuery);
-            if ($labStmt) {
-                $labStmt->bind_param('i', $selectedBalanceVisitId);
-                $labStmt->execute();
-                $labOrders = $labStmt->get_result()->fetch_all(MYSQLI_ASSOC);
-                foreach ($labOrders as $order) $labCost += ($order['price'] ?? 50);
-            } else { $labOrders = []; }
-
-            $radiologyCost = 0;
-            $radQuery = "SELECT ro.*, rt.price, rt.name as radiology_type_name FROM radiology_orders ro JOIN radiology_types rt ON ro.radiology_type_id = rt.radiology_type_id WHERE ro.visit_id = ?";
-            $radStmt = $conn->prepare($radQuery);
-            if ($radStmt) {
-                $radStmt->bind_param('i', $selectedBalanceVisitId);
-                $radStmt->execute();
-                $radiologyOrders = $radStmt->get_result()->fetch_all(MYSQLI_ASSOC);
-                foreach ($radiologyOrders as $order) $radiologyCost += ($order['price'] ?? 100);
-            } else { $radiologyOrders = []; }
-
-            $medicineCost = 0;
-            $medQuery = "SELECT pi.*, m.unit_price, m.name as medication_name FROM prescription_items pi JOIN medications m ON pi.medication_id = m.medication_id JOIN prescriptions p ON pi.prescription_id = p.prescription_id WHERE p.visit_id = ?";
-            $medStmt = $conn->prepare($medQuery);
-            if ($medStmt) {
-                $medStmt->bind_param('i', $selectedBalanceVisitId);
-                $medStmt->execute();
-                $prescriptionItems = $medStmt->get_result()->fetch_all(MYSQLI_ASSOC);
-                foreach ($prescriptionItems as $item) $medicineCost += ($item['quantity'] * $item['unit_price']);
-            } else { $prescriptionItems = []; }
-
-            $materialCost = 0;
-            $materialQuery = "SELECT mu.*, m.unit_price, m.name FROM material_usage mu JOIN materials m ON mu.material_id = m.material_id WHERE mu.visit_id = ?";
-            $materialStmt = $conn->prepare($materialQuery);
-            if ($materialStmt) {
-                $materialStmt->bind_param('i', $selectedBalanceVisitId);
-                $materialStmt->execute();
-                $materialUsage = $materialStmt->get_result()->fetch_all(MYSQLI_ASSOC);
-                foreach ($materialUsage as $usage) $materialCost += $usage['total_cost'];
-            } else { $materialUsage = []; }
-
-            $totalAmount = $labCost + $radiologyCost + $medicineCost + $materialCost;
-            ?>
-            <div class="table-card" style="margin-top: 24px;">
-                <h2 style="margin-bottom: 24px; font-size: 24px; color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px;">
-                    <i class="fas fa-file-invoice-dollar" style="color: #7c3aed; margin-right: 8px;"></i> Balance for Visit: <?php echo htmlspecialchars($visitInfo['visit_code'] ?? 'N/A'); ?>
-                </h2>
-                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 12px; margin-bottom: 24px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <h3 style="margin: 0; color: white;"><?php echo htmlspecialchars($visitInfo['patient_name'] ?? 'N/A'); ?></h3>
-                            <p style="margin: 4px 0 0 0; opacity: 0.9;"><?php echo htmlspecialchars($visitInfo['patient_code'] ?? 'N/A'); ?></p>
-                        </div>
-                        <div style="text-align: right;">
-                            <p style="margin: 0; opacity: 0.9;">Total Balance</p>
-                            <p style="margin: 4px 0 0 0; font-size: 28px; font-weight: 700;">$<?php echo number_format($totalAmount, 2); ?></p>
-                        </div>
-                    </div>
-                </div>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px;">
-                    <div style="background: #f3e8ff; padding: 16px; border-radius: 8px; border: 2px solid #d8b4fe;">
-                        <h4 style="margin: 0 0 8px; color: #7c3aed;">Lab Tests</h4>
-                        <p style="margin: 0; font-size: 20px; font-weight: 700; color: #7c3aed;">$<?php echo number_format($labCost, 2); ?></p>
-                    </div>
-                    <div style="background: #fce7f3; padding: 16px; border-radius: 8px; border: 2px solid #f9a8d4;">
-                        <h4 style="margin: 0 0 8px; color: #be185d;">Radiology</h4>
-                        <p style="margin: 0; font-size: 20px; font-weight: 700; color: #be185d;">$<?php echo number_format($radiologyCost, 2); ?></p>
-                    </div>
-                    <div style="background: #dcfce7; padding: 16px; border-radius: 8px; border: 2px solid #86efac;">
-                        <h4 style="margin: 0 0 8px; color: #166534;">Medicine</h4>
-                        <p style="margin: 0; font-size: 20px; font-weight: 700; color: #166534;">$<?php echo number_format($medicineCost, 2); ?></p>
-                    </div>
-                    <div style="background: #fef3c7; padding: 16px; border-radius: 8px; border: 2px solid #fcd34d;">
-                        <h4 style="margin: 0 0 8px; color: #92400e;">Materials</h4>
-                        <p style="margin: 0; font-size: 20px; font-weight: 700; color: #92400e;">$<?php echo number_format($materialCost, 2); ?></p>
-                    </div>
-                </div>
-                <div style="overflow-x: auto;">
-                    <table style="width: 100%; border-collapse: collapse;">
-                        <thead>
-                            <tr style="background: #f8fafc;">
-                                <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569;">Category</th>
-                                <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569;">Item</th>
-                                <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569;">Quantity</th>
-                                <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569;">Unit Price</th>
-                                <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #475569;">Total</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($labOrders as $order): ?>
-                            <tr style="border-bottom: 1px solid #e2e8f0;">
-                                <td style="padding: 12px 16px; color: #334155;"><strong>Lab</strong></td>
-                                <td style="padding: 12px 16px; color: #64748b;"><?php echo htmlspecialchars($order['test_name']); ?></td>
-                                <td style="padding: 12px 16px; color: #64748b;">1</td>
-                                <td style="padding: 12px 16px; color: #64748b;">$<?php echo number_format($order['price'] ?? 50, 2); ?></td>
-                                <td style="padding: 12px 16px; color: #334155; font-weight: 600;">$<?php echo number_format($order['price'] ?? 50, 2); ?></td>
-                            </tr>
-                            <?php endforeach; ?>
-                            <?php foreach ($radiologyOrders as $order): ?>
-                            <tr style="border-bottom: 1px solid #e2e8f0;">
-                                <td style="padding: 12px 16px; color: #334155;"><strong>Radiology</strong></td>
-                                <td style="padding: 12px 16px; color: #64748b;"><?php echo htmlspecialchars($order['radiology_type_name']); ?></td>
-                                <td style="padding: 12px 16px; color: #64748b;">1</td>
-                                <td style="padding: 12px 16px; color: #64748b;">$<?php echo number_format($order['price'] ?? 100, 2); ?></td>
-                                <td style="padding: 12px 16px; color: #334155; font-weight: 600;">$<?php echo number_format($order['price'] ?? 100, 2); ?></td>
-                            </tr>
-                            <?php endforeach; ?>
-                            <?php foreach ($prescriptionItems as $item): ?>
-                            <tr style="border-bottom: 1px solid #e2e8f0;">
-                                <td style="padding: 12px 16px; color: #334155;"><strong>Medicine</strong></td>
-                                <td style="padding: 12px 16px; color: #64748b;"><?php echo htmlspecialchars($item['medication_name']); ?></td>
-                                <td style="padding: 12px 16px; color: #64748b;"><?php echo $item['quantity']; ?></td>
-                                <td style="padding: 12px 16px; color: #64748b;">$<?php echo number_format($item['unit_price'], 2); ?></td>
-                                <td style="padding: 12px 16px; color: #334155; font-weight: 600;">$<?php echo number_format($item['quantity'] * $item['unit_price'], 2); ?></td>
-                            </tr>
-                            <?php endforeach; ?>
-                            <?php foreach ($materialUsage as $usage): ?>
-                            <tr style="border-bottom: 1px solid #e2e8f0;">
-                                <td style="padding: 12px 16px; color: #334155;"><strong>Material</strong></td>
-                                <td style="padding: 12px 16px; color: #64748b;"><?php echo htmlspecialchars($usage['name']); ?></td>
-                                <td style="padding: 12px 16px; color: #64748b;"><?php echo $usage['quantity_used']; ?></td>
-                                <td style="padding: 12px 16px; color: #64748b;">$<?php echo number_format($usage['unit_cost'], 2); ?></td>
-                                <td style="padding: 12px 16px; color: #334155; font-weight: 600;">$<?php echo number_format($usage['total_cost'], 2); ?></td>
-                            </tr>
-                            <?php endforeach; ?>
                         </tbody>
                     </table>
                 </div>
@@ -1580,17 +1436,6 @@ if (!empty($labOrders)) {
             </html>
         `);
         printWindow.document.close();
-    }
-
-    function toggleVisitBalance(visitId) {
-        const checkbox = document.getElementById('show_balance_' + visitId);
-        const url = new URL(window.location.href);
-        if (checkbox.checked) {
-            url.searchParams.set('show_balance_visit', visitId);
-        } else {
-            url.searchParams.delete('show_balance_visit');
-        }
-        window.location.href = url.toString();
     }
     </script>
 </body>

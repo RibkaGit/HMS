@@ -1913,10 +1913,10 @@ if (isset($_GET['message'])) {
                                 <i class="fas fa-bed" style="font-size: 24px; color: #1e40af;"></i>
                                 <div>
                                     <h3 style="margin: 0; color: #1e40af;">Bed Charges</h3>
-                                    <p style="margin: 0; font-size: 13px; color: #3b82f6;"><?php echo $nightsStayed; ?> night(s) @ $<?php echo $bedRate; ?>/night</p>
+                                    <p style="margin: 0; font-size: 13px; color: #3b82f6;"><?php echo $nightsStayed; ?> night(s) @ Birr <?php echo $bedRate; ?>/night</p>
                                 </div>
                             </div>
-                            <p style="font-size: 32px; font-weight: 700; color: #1e40af; margin: 0;">$<?php echo number_format($bedCharges, 2); ?></p>
+                            <p style="font-size: 32px; font-weight: 700; color: #1e40af; margin: 0;">Birr <?php echo number_format($bedCharges, 2); ?></p>
                         </div>
 
                         <!-- Medicine Costs -->
@@ -1928,7 +1928,7 @@ if (isset($_GET['message'])) {
                                     <p style="margin: 0; font-size: 13px; color: #22c55e;"><?php echo count($prescriptionItems); ?> medication(s)</p>
                                 </div>
                             </div>
-                            <p style="font-size: 32px; font-weight: 700; color: #166534; margin: 0;">$<?php echo number_format($medicineCosts, 2); ?></p>
+                            <p style="font-size: 32px; font-weight: 700; color: #166534; margin: 0;">Birr <?php echo number_format($medicineCosts, 2); ?></p>
                         </div>
 
                         <!-- Material Costs -->
@@ -1940,7 +1940,7 @@ if (isset($_GET['message'])) {
                                     <p style="margin: 0; font-size: 13px; color: #b45309;"><?php echo count($materialUsage); ?> item(s) used</p>
                                 </div>
                             </div>
-                            <p style="font-size: 32px; font-weight: 700; color: #92400e; margin: 0;">$<?php echo number_format($materialCosts, 2); ?></p>
+                            <p style="font-size: 32px; font-weight: 700; color: #92400e; margin: 0;">Birr <?php echo number_format($materialCosts, 2); ?></p>
                         </div>
 
                         <!-- Lab Costs -->
@@ -1952,7 +1952,7 @@ if (isset($_GET['message'])) {
                                     <p style="margin: 0; font-size: 13px; color: #8b5cf6;"><?php echo count($labOrdersData); ?> test(s)</p>
                                 </div>
                             </div>
-                            <p style="font-size: 32px; font-weight: 700; color: #7c3aed; margin: 0;">$<?php echo number_format($labCosts, 2); ?></p>
+                            <p style="font-size: 32px; font-weight: 700; color: #7c3aed; margin: 0;">Birr <?php echo number_format($labCosts, 2); ?></p>
                         </div>
 
                         <!-- Radiology Costs -->
@@ -1964,7 +1964,7 @@ if (isset($_GET['message'])) {
                                     <p style="margin: 0; font-size: 13px; color: #db2777;"><?php echo count($radiologyOrdersData); ?> scan(s)</p>
                                 </div>
                             </div>
-                            <p style="font-size: 32px; font-weight: 700; color: #be185d; margin: 0;">$<?php echo number_format($radiologyCosts, 2); ?></p>
+                            <p style="font-size: 32px; font-weight: 700; color: #be185d; margin: 0;">Birr <?php echo number_format($radiologyCosts, 2); ?></p>
                         </div>
                     </div>
 
@@ -1994,8 +1994,8 @@ if (isset($_GET['message'])) {
                                         <tr style="border-bottom: 1px solid #fcd34d;">
                                             <td style="padding: 10px 12px; color: #334155;"><?php echo htmlspecialchars($usage['name'] ?? 'Unknown'); ?></td>
                                             <td style="padding: 10px 12px; color: #64748b;"><?php echo $usage['quantity_used']; ?> <?php echo htmlspecialchars($usage['unit'] ?? ''); ?></td>
-                                            <td style="padding: 10px 12px; color: #64748b;">$<?php echo number_format($usage['unit_cost'], 2); ?></td>
-                                            <td style="padding: 10px 12px; color: #334155; font-weight: 600;">$<?php echo number_format($usage['total_cost'], 2); ?></td>
+                                            <td style="padding: 10px 12px; color: #64748b;">Birr <?php echo number_format($usage['unit_cost'], 2); ?></td>
+                                            <td style="padding: 10px 12px; color: #334155; font-weight: 600;">Birr <?php echo number_format($usage['total_cost'], 2); ?></td>
                                             <td style="padding: 10px 12px; color: #64748b;"><?php echo date('M d, Y H:i', strtotime($usage['used_at'])); ?></td>
                                         </tr>
                                         <?php endforeach; ?>
@@ -2024,8 +2024,8 @@ if (isset($_GET['message'])) {
                                         <tr style="border-bottom: 1px solid #86efac;">
                                             <td style="padding: 10px 12px; color: #334155;"><?php echo htmlspecialchars($item['name'] ?? 'Unknown'); ?></td>
                                             <td style="padding: 10px 12px; color: #64748b;"><?php echo $item['quantity']; ?></td>
-                                            <td style="padding: 10px 12px; color: #64748b;">$<?php echo number_format($item['unit_price'], 2); ?></td>
-                                            <td style="padding: 10px 12px; color: #334155; font-weight: 600;">$<?php echo number_format($item['quantity'] * $item['unit_price'], 2); ?></td>
+                                            <td style="padding: 10px 12px; color: #64748b;">Birr <?php echo number_format($item['unit_price'], 2); ?></td>
+                                            <td style="padding: 10px 12px; color: #334155; font-weight: 600;">Birr <?php echo number_format($item['quantity'] * $item['unit_price'], 2); ?></td>
                                         </tr>
                                         <?php endforeach; ?>
                                     </tbody>
@@ -2051,7 +2051,7 @@ if (isset($_GET['message'])) {
                                         <?php foreach ($labOrdersData as $lab): ?>
                                         <tr style="border-bottom: 1px solid #d8b4fe;">
                                             <td style="padding: 10px 12px; color: #334155;"><?php echo htmlspecialchars($lab['test_name'] ?? 'Unknown'); ?></td>
-                                            <td style="padding: 10px 12px; color: #64748b;">$<?php echo number_format($lab['price'] ?? 50, 2); ?></td>
+                                            <td style="padding: 10px 12px; color: #64748b;">Birr <?php echo number_format($lab['price'] ?? 50, 2); ?></td>
                                             <td style="padding: 10px 12px; color: #64748b;"><?php echo htmlspecialchars($lab['status_name'] ?? 'Ordered'); ?></td>
                                         </tr>
                                         <?php endforeach; ?>
@@ -2078,7 +2078,7 @@ if (isset($_GET['message'])) {
                                         <?php foreach ($radiologyOrdersData as $rad): ?>
                                         <tr style="border-bottom: 1px solid #f9a8d4;">
                                             <td style="padding: 10px 12px; color: #334155;"><?php echo htmlspecialchars($rad['radiology_type_name'] ?? 'Unknown'); ?></td>
-                                            <td style="padding: 10px 12px; color: #64748b;">$<?php echo number_format($rad['price'] ?? 100, 2); ?></td>
+                                            <td style="padding: 10px 12px; color: #64748b;">Birr <?php echo number_format($rad['price'] ?? 100, 2); ?></td>
                                             <td style="padding: 10px 12px; color: #64748b;"><?php echo htmlspecialchars($rad['status_name'] ?? 'Ordered'); ?></td>
                                         </tr>
                                         <?php endforeach; ?>

@@ -38,12 +38,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $injectionDosage = sanitizeInput($_POST['injection_dosage'] ?? '');
     $medicineGiven = isset($_POST['medicine_given']) ? 1 : 0;
     $medicineNotes = sanitizeInput($_POST['medicine_notes'] ?? '');
+    $materialGiven = isset($_POST['material_given']) ? 1 : 0;
+    $materialNotes = sanitizeInput($_POST['material_notes'] ?? '');
     $vitalSigns = sanitizeInput($_POST['vital_signs'] ?? '');
 
-    $checkupQuery = "INSERT INTO ipd_checkups (visit_id, patient_id, recorded_by, progress_notes, glucose_level, glucose_unit, glucose_type, injection_given, injection_type, injection_dosage, medicine_given, medicine_notes, vital_signs)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    $checkupQuery = "INSERT INTO ipd_checkups (visit_id, patient_id, recorded_by, progress_notes, glucose_level, glucose_unit, glucose_type, injection_given, injection_type, injection_dosage, medicine_given, medicine_notes, material_given, material_notes, vital_signs)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     $checkupStmt = $conn->prepare($checkupQuery);
-    $checkupStmt->bind_param('iisdsdsississ',
+    $checkupStmt->bind_param('iisdsdsississs',
         $visitId,
         $patientId,
         $recordedBy,
@@ -56,6 +58,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $injectionDosage,
         $medicineGiven,
         $medicineNotes,
+        $materialGiven,
+        $materialNotes,
         $vitalSigns
     );
 
@@ -79,6 +83,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                         sanitizeInput($med['notes'] ?? '')
                     );
                     $medStmt->execute();
+                }
+            }
+        }
+
+        // Handle material administration
+        if ($materialGiven && isset($_POST['materials']) && is_array($_POST['materials'])) {
+            foreach ($_POST['materials'] as $mat) {
+                if (!empty($mat['material_id'])) {
+                    $matQuery = "INSERT INTO ipd_material_administration (checkup_id, visit_id, material_id, quantity_used, unit_cost, administered_by, notes)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)";
+                    $matStmt = $conn->prepare($matQuery);
+                    $matStmt->bind_param('iiisiis',
+                        $checkupId,
+                        $visitId,
+                        intval($mat['material_id']),
+                        intval($mat['quantity_used'] ?? 1),
+                        floatval($mat['unit_cost'] ?? 0),
+                        $recordedBy,
+                        sanitizeInput($mat['notes'] ?? '')
+                    );
+                    if ($matStmt->execute()) {
+                        // Update material stock
+                        $updateStockQuery = "UPDATE materials SET stock_quantity = stock_quantity - ? WHERE material_id = ?";
+                        $updateStockStmt = $conn->prepare($updateStockQuery);
+                        $updateStockStmt->bind_param('ii', intval($mat['quantity_used'] ?? 1), intval($mat['material_id']));
+                        $updateStockStmt->execute();
+
+                        // Record material usage
+                        $usageQuery = "INSERT INTO material_usage (visit_id, material_id, quantity_used, unit_cost, total_cost, used_at, used_by)
+                                     VALUES (?, ?, ?, ?, ?, NOW(), ?)";
+                        $usageStmt = $conn->prepare($usageQuery);
+                        $totalCost = (intval($mat['quantity_used'] ?? 1) * floatval($mat['unit_cost'] ?? 0));
+                        $usageStmt->bind_param('iiiddi',
+                            $visitId,
+                            intval($mat['material_id']),
+                            intval($mat['quantity_used'] ?? 1),
+                            floatval($mat['unit_cost'] ?? 0),
+                            $totalCost,
+                            $recordedBy
+                        );
+                        $usageStmt->execute();
+                    }
                 }
             }
         }
@@ -153,6 +199,9 @@ if ($selectedVisitId > 0) {
 
 // Get medications for dropdown
 $medications = $conn->query("SELECT medication_id, name, strength, unit, stock_quantity FROM medications WHERE is_active = 1 ORDER BY name ASC")->fetch_all(MYSQLI_ASSOC);
+
+// Get materials for dropdown
+$materials = $conn->query("SELECT material_id, name, unit_price, stock_quantity FROM materials WHERE is_active = 1 ORDER BY name ASC")->fetch_all(MYSQLI_ASSOC);
 
 if (isset($_GET['message'])) {
     $message = urldecode($_GET['message']);
@@ -458,6 +507,50 @@ if (isset($_GET['message'])) {
                             <textarea id="medicine_notes" name="medicine_notes" rows="2" placeholder="Additional notes about medication administration..." style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;"></textarea>
                         </div>
 
+                        <div class="form-group" style="background: #fef3c7; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
+                            <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                                <input type="checkbox" name="material_given" value="1" id="material_given" onchange="toggleMaterialFields()">
+                                <strong>Material Used</strong>
+                            </label>
+                            <div id="material_fields" style="display: none; margin-top: 12px;">
+                                <div id="material_container">
+                                    <div class="form-row" style="margin-bottom: 12px;">
+                                        <div class="form-group" style="flex: 2;">
+                                            <label>Material</label>
+                                            <select name="materials[0][material_id]" required style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                                <option value="">Select material...</option>
+                                                <?php foreach ($materials as $mat): ?>
+                                                    <option value="<?php echo $mat['material_id']; ?>" data-unit-cost="<?php echo $mat['unit_price']; ?>">
+                                                        <?php echo htmlspecialchars($mat['name']); ?> (Stock: <?php echo $mat['stock_quantity']; ?>)
+                                                    </option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                        </div>
+                                        <div class="form-group" style="flex: 1;">
+                                            <label>Quantity</label>
+                                            <input type="number" name="materials[0][quantity_used]" min="1" value="1" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                        </div>
+                                        <div class="form-group" style="flex: 1;">
+                                            <label>Unit Cost</label>
+                                            <input type="number" name="materials[0][unit_cost]" step="0.01" placeholder="0.00" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                        </div>
+                                        <div class="form-group" style="flex: 2;">
+                                            <label>Notes</label>
+                                            <input type="text" name="materials[0][notes]" placeholder="Optional notes" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                        </div>
+                                    </div>
+                                </div>
+                                <button type="button" onclick="addMaterialRow()" class="btn-cancel" style="margin-top: 8px; width: 100%; border-style: dashed;">
+                                    <i class="fas fa-plus"></i> Add Another Material
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="material_notes">General Material Notes</label>
+                            <textarea id="material_notes" name="material_notes" rows="2" placeholder="Additional notes about material usage..." style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;"></textarea>
+                        </div>
+
                         <div class="btn-group">
                             <button type="submit" class="btn-submit">
                                 <i class="fas fa-save"></i> Save Checkup
@@ -539,6 +632,36 @@ if (isset($_GET['message'])) {
                                         <em><?php echo nl2br(htmlspecialchars($checkup['medicine_notes'])); ?></em>
                                     </div>
                                 <?php endif; ?>
+
+                                <?php if ($checkup['material_given']): ?>
+                                    <div style="margin-bottom: 12px;">
+                                        <span class="medicine-badge" style="background: #fef3c7; color: #92400e;">
+                                            <i class="fas fa-boxes"></i> Materials Used
+                                        </span>
+                                        <?php
+                                        $matAdminQuery = "SELECT ima.*, m.name as material_name, m.unit
+                                                         FROM ipd_material_administration ima
+                                                         JOIN materials m ON ima.material_id = m.material_id
+                                                         WHERE ima.checkup_id = ?";
+                                        $matAdminStmt = $conn->prepare($matAdminQuery);
+                                        $matAdminStmt->bind_param('i', $checkup['checkup_id']);
+                                        $matAdminStmt->execute();
+                                        $materialsUsed = $matAdminStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+                                        ?>
+                                        <?php foreach ($materialsUsed as $mat): ?>
+                                            <div class="medicine-item">
+                                                <span><?php echo htmlspecialchars($mat['material_name']); ?> - Qty: <?php echo $mat['quantity_used']; ?></span>
+                                                <span>Cost: Birr <?php echo number_format($mat['unit_cost'], 2); ?></span>
+                                            </div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php endif; ?>
+
+                                <?php if ($checkup['material_notes']): ?>
+                                    <div style="margin-top: 12px; font-size: 13px; color: #64748b;">
+                                        <em><?php echo nl2br(htmlspecialchars($checkup['material_notes'])); ?></em>
+                                    </div>
+                                <?php endif; ?>
                             </div>
                         <?php endforeach; ?>
                     <?php endif; ?>
@@ -549,6 +672,7 @@ if (isset($_GET['message'])) {
 
     <script>
         let medicationCount = 0;
+        let materialCount = 0;
 
         function toggleInjectionFields() {
             const checkbox = document.getElementById('injection_given');
@@ -559,6 +683,12 @@ if (isset($_GET['message'])) {
         function toggleMedicineFields() {
             const checkbox = document.getElementById('medicine_given');
             const fields = document.getElementById('medicine_fields');
+            fields.style.display = checkbox.checked ? 'block' : 'none';
+        }
+
+        function toggleMaterialFields() {
+            const checkbox = document.getElementById('material_given');
+            const fields = document.getElementById('material_fields');
             fields.style.display = checkbox.checked ? 'block' : 'none';
         }
 
@@ -591,6 +721,46 @@ if (isset($_GET['message'])) {
                 <div class="form-group" style="flex: 2;">
                     <label>Notes</label>
                     <input type="text" name="medications[${medicationCount}][notes]" placeholder="Optional notes" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                </div>
+                <div class="form-group" style="flex: 0;">
+                    <label>&nbsp;</label>
+                    <button type="button" onclick="this.closest('.form-row').remove()" class="btn-delete" style="padding: 8px 12px;">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            `;
+            container.appendChild(newRow);
+        }
+
+        function addMaterialRow() {
+            materialCount++;
+            const container = document.getElementById('material_container');
+            const newRow = document.createElement('div');
+            newRow.className = 'form-row';
+            newRow.style.marginBottom = '12px';
+            newRow.innerHTML = `
+                <div class="form-group" style="flex: 2;">
+                    <label>Material</label>
+                    <select name="materials[${materialCount}][material_id]" required style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                        <option value="">Select material...</option>
+                        <?php foreach ($materials as $mat): ?>
+                            <option value="<?php echo $mat['material_id']; ?>" data-unit-cost="<?php echo $mat['unit_price']; ?>">
+                                <?php echo htmlspecialchars($mat['name']); ?> (Stock: <?php echo $mat['stock_quantity']; ?>)
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="form-group" style="flex: 1;">
+                    <label>Quantity</label>
+                    <input type="number" name="materials[${materialCount}][quantity_used]" min="1" value="1" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                </div>
+                <div class="form-group" style="flex: 1;">
+                    <label>Unit Cost</label>
+                    <input type="number" name="materials[${materialCount}][unit_cost]" step="0.01" placeholder="0.00" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                </div>
+                <div class="form-group" style="flex: 2;">
+                    <label>Notes</label>
+                    <input type="text" name="materials[${materialCount}][notes]" placeholder="Optional notes" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
                 </div>
                 <div class="form-group" style="flex: 0;">
                     <label>&nbsp;</label>

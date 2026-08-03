@@ -858,28 +858,67 @@ if (!empty($radiologyOrders)) {
                         </div>
                         <div style="text-align: right;">
                             <p style="margin: 0; opacity: 0.9;">Total Balance</p>
-                            <p style="margin: 4px 0 0 0; font-size: 28px; font-weight: 700;">$<?php echo number_format($totalAmount, 2); ?></p>
+                            <p style="margin: 4px 0 0 0; font-size: 28px; font-weight: 700;">Birr <?php echo number_format($totalAmount, 2); ?></p>
                         </div>
                     </div>
                 </div>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px;">
                     <div style="background: #fce7f3; padding: 16px; border-radius: 8px; border: 2px solid #f9a8d4;">
                         <h4 style="margin: 0 0 8px; color: #be185d;">Radiology</h4>
-                        <p style="margin: 0; font-size: 20px; font-weight: 700; color: #be185d;">$<?php echo number_format($radiologyCost, 2); ?></p>
+                        <p style="margin: 0; font-size: 20px; font-weight: 700; color: #be185d;">Birr <?php echo number_format($radiologyCost, 2); ?></p>
                     </div>
                     <div style="background: #f3e8ff; padding: 16px; border-radius: 8px; border: 2px solid #d8b4fe;">
                         <h4 style="margin: 0 0 8px; color: #7c3aed;">Lab Tests</h4>
-                        <p style="margin: 0; font-size: 20px; font-weight: 700; color: #7c3aed;">$<?php echo number_format($labCost, 2); ?></p>
+                        <p style="margin: 0; font-size: 20px; font-weight: 700; color: #7c3aed;">Birr <?php echo number_format($labCost, 2); ?></p>
                     </div>
                     <div style="background: #dcfce7; padding: 16px; border-radius: 8px; border: 2px solid #86efac;">
                         <h4 style="margin: 0 0 8px; color: #166534;">Medicine</h4>
-                        <p style="margin: 0; font-size: 20px; font-weight: 700; color: #166534;">$<?php echo number_format($medicineCost, 2); ?></p>
+                        <p style="margin: 0; font-size: 20px; font-weight: 700; color: #166534;">Birr <?php echo number_format($medicineCost, 2); ?></p>
                     </div>
                     <div style="background: #fef3c7; padding: 16px; border-radius: 8px; border: 2px solid #fcd34d;">
                         <h4 style="margin: 0 0 8px; color: #92400e;">Materials</h4>
-                        <p style="margin: 0; font-size: 20px; font-weight: 700; color: #92400e;">$<?php echo number_format($materialCost, 2); ?></p>
+                        <p style="margin: 0; font-size: 20px; font-weight: 700; color: #92400e;">Birr <?php echo number_format($materialCost, 2); ?></p>
                     </div>
                 </div>
+
+                <!-- Payment Section -->
+                <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 24px; border: 2px solid #e2e8f0;">
+                    <h4 style="margin: 0 0 16px 0; font-size: 16px; font-weight: 600; color: #1e293b;">Payment Method</h4>
+                    <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px 16px; background: white; border: 2px solid #e2e8f0; border-radius: 6px;">
+                            <input type="checkbox" name="advance_payment" value="1">
+                            <span>Advance Payment</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px 16px; background: white; border: 2px solid #e2e8f0; border-radius: 6px;">
+                            <input type="checkbox" name="payment" value="1">
+                            <span>Payment</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px 16px; background: white; border: 2px solid #e2e8f0; border-radius: 6px;">
+                            <input type="checkbox" name="settlement" value="1">
+                            <span>Settlement</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Consultation, Payment, Balance Breakdown -->
+                <div style="background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%); padding: 20px; border-radius: 8px; margin-bottom: 24px; border: 2px solid #cbd5e1;">
+                    <h4 style="margin: 0 0 16px 0; font-size: 16px; font-weight: 600; color: #1e293b;">Financial Summary</h4>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
+                        <div style="background: white; padding: 16px; border-radius: 6px; border: 1px solid #cbd5e1;">
+                            <p style="margin: 0 0 8px 0; font-size: 13px; color: #64748b;">Consultation Fee</p>
+                            <p style="margin: 0; font-size: 20px; font-weight: 700; color: #1e293b;">Birr 200.00</p>
+                        </div>
+                        <div style="background: white; padding: 16px; border-radius: 6px; border: 1px solid #cbd5e1;">
+                            <p style="margin: 0 0 8px 0; font-size: 13px; color: #64748b;">Total Payment</p>
+                            <p style="margin: 0; font-size: 20px; font-weight: 700; color: #16a34a;">Birr 0.00</p>
+                        </div>
+                        <div style="background: white; padding: 16px; border-radius: 6px; border: 1px solid #cbd5e1;">
+                            <p style="margin: 0 0 8px 0; font-size: 13px; color: #64748b;">Remaining Balance</p>
+                            <p style="margin: 0; font-size: 20px; font-weight: 700; color: #dc2626;">Birr <?php echo number_format($totalAmount + 200, 2); ?></p>
+                        </div>
+                    </div>
+                </div>
+
                 <div style="overflow-x: auto;">
                     <table style="width: 100%; border-collapse: collapse;">
                         <thead>
@@ -897,8 +936,8 @@ if (!empty($radiologyOrders)) {
                                 <td style="padding: 12px 16px; color: #334155;"><strong>Radiology</strong></td>
                                 <td style="padding: 12px 16px; color: #64748b;"><?php echo htmlspecialchars($order['radiology_type_name']); ?></td>
                                 <td style="padding: 12px 16px; color: #64748b;">1</td>
-                                <td style="padding: 12px 16px; color: #64748b;">$<?php echo number_format($order['price'] ?? 100, 2); ?></td>
-                                <td style="padding: 12px 16px; color: #334155; font-weight: 600;">$<?php echo number_format($order['price'] ?? 100, 2); ?></td>
+                                <td style="padding: 12px 16px; color: #64748b;">Birr <?php echo number_format($order['price'] ?? 100, 2); ?></td>
+                                <td style="padding: 12px 16px; color: #334155; font-weight: 600;">Birr <?php echo number_format($order['price'] ?? 100, 2); ?></td>
                             </tr>
                             <?php endforeach; ?>
                             <?php foreach ($labOrders as $order): ?>
@@ -906,8 +945,8 @@ if (!empty($radiologyOrders)) {
                                 <td style="padding: 12px 16px; color: #334155;"><strong>Lab</strong></td>
                                 <td style="padding: 12px 16px; color: #64748b;"><?php echo htmlspecialchars($order['test_name']); ?></td>
                                 <td style="padding: 12px 16px; color: #64748b;">1</td>
-                                <td style="padding: 12px 16px; color: #64748b;">$<?php echo number_format($order['price'] ?? 50, 2); ?></td>
-                                <td style="padding: 12px 16px; color: #334155; font-weight: 600;">$<?php echo number_format($order['price'] ?? 50, 2); ?></td>
+                                <td style="padding: 12px 16px; color: #64748b;">Birr <?php echo number_format($order['price'] ?? 50, 2); ?></td>
+                                <td style="padding: 12px 16px; color: #334155; font-weight: 600;">Birr <?php echo number_format($order['price'] ?? 50, 2); ?></td>
                             </tr>
                             <?php endforeach; ?>
                             <?php foreach ($prescriptionItems as $item): ?>
@@ -915,8 +954,8 @@ if (!empty($radiologyOrders)) {
                                 <td style="padding: 12px 16px; color: #334155;"><strong>Medicine</strong></td>
                                 <td style="padding: 12px 16px; color: #64748b;"><?php echo htmlspecialchars($item['medication_name']); ?></td>
                                 <td style="padding: 12px 16px; color: #64748b;"><?php echo $item['quantity']; ?></td>
-                                <td style="padding: 12px 16px; color: #64748b;">$<?php echo number_format($item['unit_price'], 2); ?></td>
-                                <td style="padding: 12px 16px; color: #334155; font-weight: 600;">$<?php echo number_format($item['quantity'] * $item['unit_price'], 2); ?></td>
+                                <td style="padding: 12px 16px; color: #64748b;">Birr <?php echo number_format($item['unit_price'], 2); ?></td>
+                                <td style="padding: 12px 16px; color: #334155; font-weight: 600;">Birr <?php echo number_format($item['quantity'] * $item['unit_price'], 2); ?></td>
                             </tr>
                             <?php endforeach; ?>
                             <?php foreach ($materialUsage as $usage): ?>
@@ -924,8 +963,8 @@ if (!empty($radiologyOrders)) {
                                 <td style="padding: 12px 16px; color: #334155;"><strong>Material</strong></td>
                                 <td style="padding: 12px 16px; color: #64748b;"><?php echo htmlspecialchars($usage['name']); ?></td>
                                 <td style="padding: 12px 16px; color: #64748b;"><?php echo $usage['quantity_used']; ?></td>
-                                <td style="padding: 12px 16px; color: #64748b;">$<?php echo number_format($usage['unit_cost'], 2); ?></td>
-                                <td style="padding: 12px 16px; color: #334155; font-weight: 600;">$<?php echo number_format($usage['total_cost'], 2); ?></td>
+                                <td style="padding: 12px 16px; color: #64748b;">Birr <?php echo number_format($usage['unit_cost'], 2); ?></td>
+                                <td style="padding: 12px 16px; color: #334155; font-weight: 600;">Birr <?php echo number_format($usage['total_cost'], 2); ?></td>
                             </tr>
                             <?php endforeach; ?>
                         </tbody>

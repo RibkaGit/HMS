@@ -9,6 +9,10 @@ if (!isset($_SESSION['user_id'])) {
     exit();
 }
 
+// Initialize message variables
+$message = '';
+$error = '';
+
 // ============================================================================
 // CREATE MATERIAL
 // ============================================================================
@@ -119,7 +123,8 @@ if (isset($_GET['action']) && $_GET['action'] === 'edit_material' && isset($_GET
 
 // Get low stock materials
 $lowStockQuery = "SELECT * FROM materials WHERE is_active = 1 AND stock_quantity <= minimum_stock ORDER BY stock_quantity ASC";
-$lowStockMaterials = $conn->query($lowStockQuery)->fetch_all(MYSQLI_ASSOC);
+$lowStockResult = $conn->query($lowStockQuery);
+$lowStockMaterials = $lowStockResult ? $lowStockResult->fetch_all(MYSQLI_ASSOC) : [];
 
 if (isset($_GET['message'])) {
     $message = urldecode($_GET['message']);

@@ -679,6 +679,9 @@ if (isset($_GET['message'])) {
                                     <td><?php echo date('M d, Y', strtotime($invoice['created_at'])); ?></td>
                                     <td>
                                         <div class="action-buttons">
+                                            <button type="button" class="btn-balance" onclick="openBalanceModal(<?php echo $invoice['visit_id']; ?>)" style="display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 4px 10px; border-radius: 4px; background: #dbeafe; color: #1e40af; font-size: 12px; font-weight: 500; border: 1px solid #93c5fd;">
+                                                <i class="fas fa-file-invoice-dollar"></i> Balance
+                                            </button>
                                             <?php if ($invoice['status_name'] !== 'Paid' && $invoice['status_name'] !== 'Void'): ?>
                                                 <a href="billing.php?action=pay&id=<?php echo $invoice['invoice_id']; ?>" class="btn-pay">
                                                     <i class="fas fa-hand-holding-usd"></i> Pay
@@ -737,6 +740,7 @@ if (isset($_GET['message'])) {
                         The invoice will include consultation fee and any lab tests associated with this visit.
                     </p>
                 </div>
+                </div>
                 
                 <div class="btn-group">
                     <button type="submit" class="btn-submit">
@@ -749,14 +753,15 @@ if (isset($_GET['message'])) {
     </div>
     <?php endif; ?>
 
-    <!-- Payment Modal -->
-    <?php if (isset($_GET['action']) && $_GET['action'] === 'pay' && isset($_GET['id'])): 
-        $invoiceId = intval($_GET['id']);
-        $invoiceQuery = "SELECT i.*, CONCAT(p.first_name, ' ', p.last_name) as patient_name 
-                         FROM invoices i
-                         JOIN patients p ON i.patient_id = p.patient_id
-                         WHERE i.invoice_id = ?";
-        $stmt = $conn->prepare($invoiceQuery);
+    <?php if (isset($_GET['action']) && $_GET['action'] === 'pay' && isset($_GET['id'])): ?>
+    <?php
+    $invoiceId = intval($_GET['id']);
+    $invoiceQuery = "SELECT i.*, v.visit_code, CONCAT(p.first_name, ' ', p.last_name) as patient_name
+                   FROM invoices i 
+                   JOIN visits v ON i.visit_id = v.visit_id
+                   JOIN patients p ON v.patient_id = p.patient_id
+                   WHERE i.invoice_id = ?";
+    $stmt = $conn->prepare($invoiceQuery);
         $stmt->bind_param('i', $invoiceId);
         $stmt->execute();
         $payInvoice = $stmt->get_result()->fetch_assoc();
@@ -815,8 +820,55 @@ if (isset($_GET['message'])) {
             </form>
         </div>
     </div>
-    <?php endif; endif; ?>
+    <?php endif; ?>
 
+    <!-- Balance Modal -->
+    <div id="balanceModal" class="form-modal" style="display: none;">
+        <div class="form-modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+            <button class="close-btn" onclick="closeBalanceModal()">&times;</button>
+            <h2 style="margin-bottom: 24px;">Patient Balance</h2>
+            <div id="balanceContent">
+                <p>Loading balance information...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Payment Modal -->
+    <div id="paymentModal" class="form-modal" style="display: none;">
+        <div class="form-modal-content" style="max-width: 600px;">
+            <button class="close-btn" onclick="closePaymentModal()">&times;</button>
+            <h2 style="margin-bottom: 24px;">Process Payment</h2>
+            <div id="paymentContent">
+                <p>Loading payment information...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function openBalanceModal(visitId) {
+            const modal = document.getElementById('balanceModal');
+            const content = document.getElementById('balanceContent');
+            modal.style.display = 'flex';
+            content.innerHTML = '<p>Loading balance information...</p>';
+
+            fetch('medical_records.php?action=get_balance&visit_id=' + visitId)
+                .then(response => response.text())
+                .then(data => {
+                    content.innerHTML = data;
+                })
+                .catch(error => {
+                    content.innerHTML = '<p>Error loading balance information.</p>';
+                });
+        }
+
+        function closeBalanceModal() {
+            document.getElementById('balanceModal').style.display = 'none';
+        }
+
+        function closePaymentModal() {
+            document.getElementById('paymentModal').style.display = 'none';
+        }
+    </script>
     <script src="assets/js/dashboard.js"></script>
 </body>
 </html>

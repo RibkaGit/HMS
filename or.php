@@ -172,7 +172,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $visitId = intval($_POST['visit_id']);
     $patientId = intval($_POST['patient_id']);
     $selectedMaterials = isset($_POST['materials']) ? $_POST['materials'] : [];
-    $medications = isset($_POST['medications']) ? $_POST['medications'] : [];
+    $services = isset($_POST['services']) ? $_POST['services'] : [];
     $notes = sanitizeInput($_POST['notes'] ?? '');
 
     // Ensure material_plans table exists
@@ -215,35 +215,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             // Get material details
             $matQuery = "SELECT unit_cost FROM materials WHERE material_id = ?";
             $matStmt = $conn->prepare($matQuery);
-            $matStmt->bind_param('i', $matId);
-            $matStmt->execute();
-            $matResult = $matStmt->get_result()->fetch_assoc();
-            $unitCost = $matResult['unit_cost'] ?? 0;
+            if ($matStmt) {
+                $matStmt->bind_param('i', $matId);
+                $matStmt->execute();
+                $matResult = $matStmt->get_result()->fetch_assoc();
+                $unitCost = $matResult['unit_cost'] ?? 0;
 
-            $itemQuery = "INSERT INTO material_plan_items (plan_id, material_id, quantity, unit_cost, item_status)
-                         VALUES (?, ?, 1, ?, 'Pending')";
-            $itemStmt = $conn->prepare($itemQuery);
-            $itemStmt->bind_param('iid', $planId, $matId, $unitCost);
-            $itemStmt->execute();
+                $itemQuery = "INSERT INTO material_plan_items (plan_id, material_id, quantity, unit_cost, item_status)
+                             VALUES (?, ?, 1, ?, 'Pending')";
+                $itemStmt = $conn->prepare($itemQuery);
+                if ($itemStmt) {
+                    $itemStmt->bind_param('iid', $planId, $matId, $unitCost);
+                    $itemStmt->execute();
+                }
+            }
         }
 
-        // Add medications to plan
-        foreach ($medications as $medId => $medData) {
-            $medId = intval($medId);
-            $quantity = intval($medData['quantity'] ?? 1);
-            // Get medication details
-            $medQuery = "SELECT unit_price FROM medications WHERE medication_id = ?";
-            $medStmt = $conn->prepare($medQuery);
-            $medStmt->bind_param('i', $medId);
-            $medStmt->execute();
-            $medResult = $medStmt->get_result()->fetch_assoc();
-            $unitCost = $medResult['unit_price'] ?? 0;
-
-            $itemQuery = "INSERT INTO material_plan_items (plan_id, medication_id, quantity, unit_cost, item_status)
-                         VALUES (?, ?, ?, ?, 'Pending')";
-            $itemStmt = $conn->prepare($itemQuery);
-            $itemStmt->bind_param('iiid', $planId, $medId, $quantity, $unitCost);
-            $itemStmt->execute();
+        // Add services to plan (store as notes for now, or create a separate table if needed)
+        if (!empty($services)) {
+            $serviceNames = [
+                'anesthesia' => 'Anesthesia (Pain Killer)',
+                'injection' => 'Injection Administration',
+                'iv_fluids' => 'IV Fluids',
+                'blood_transfusion' => 'Blood Transfusion',
+                'oxygen_therapy' => 'Oxygen Therapy',
+                'monitoring' => 'Vital Monitoring',
+                'dressing' => 'Wound Dressing',
+                'catheter' => 'Catheter Insertion'
+            ];
+            $serviceList = [];
+            foreach ($services as $service) {
+                $serviceList[] = $serviceNames[$service] ?? $service;
+            }
+            $notes .= "\n\nServices: " . implode(', ', $serviceList);
         }
 
         // Create nurse assignment for material plan
@@ -251,8 +255,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                       SELECT ?, ?, assigned_nurse_id, ?, 'Material Plan', ?, 'Assigned'
                       FROM doctor_orders WHERE visit_id = ? AND assigned_nurse_id IS NOT NULL LIMIT 1";
         $assignStmt = $conn->prepare($assignQuery);
-        $assignStmt->bind_param('iiisi', $visitId, $patientId, $_SESSION['user_id'], $notes, $visitId);
-        $assignStmt->execute();
+        if ($assignStmt) {
+            $assignStmt->bind_param('iiisi', $visitId, $patientId, $_SESSION['user_id'], $notes, $visitId);
+            $assignStmt->execute();
+        }
 
         $conn->commit();
         logUserActivity($conn, $_SESSION['user_id'], 'Created Material Plan', "Created material plan for visit ID: {$visitId}");
@@ -1294,19 +1300,57 @@ if (isset($_GET['message'])) {
 
                 <div class="form-group" style="background: #dbeafe; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
                     <label style="display: block; font-weight: 600; color: #1e40af; margin-bottom: 12px;">
-                        <i class="fas fa-pills"></i> Select Medications
+                        <i class="fas fa-concierge-bell"></i> Select Services
                     </label>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px;">
-                        <?php foreach ($medications as $med): ?>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px;">
                         <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
-                            <input type="checkbox" name="medications[<?php echo $med['medication_id']; ?>][medication_id]" value="<?php echo $med['medication_id']; ?>">
+                            <input type="checkbox" name="services[]" value="anesthesia">
                             <span style="font-size: 13px;">
-                                <?php echo htmlspecialchars($med['name'] . ' ' . $med['strength'] . ' ' . $med['unit']); ?>
-                                <small style="color: #64748b;">(Stock: <?php echo $med['stock_quantity']; ?>)</small>
+                                <i class="fas fa-syringe"></i> Anesthesia (Pain Killer)
                             </span>
-                            <input type="number" name="medications[<?php echo $med['medication_id']; ?>][quantity]" value="1" min="1" style="width: 50px; padding: 4px; border: 1px solid #e2e8f0; border-radius: 4px;">
                         </label>
-                        <?php endforeach; ?>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
+                            <input type="checkbox" name="services[]" value="injection">
+                            <span style="font-size: 13px;">
+                                <i class="fas fa-syringe"></i> Injection Administration
+                            </span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
+                            <input type="checkbox" name="services[]" value="iv_fluids">
+                            <span style="font-size: 13px;">
+                                <i class="fas fa-tint"></i> IV Fluids
+                            </span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
+                            <input type="checkbox" name="services[]" value="blood_transfusion">
+                            <span style="font-size: 13px;">
+                                <i class="fas fa-heart"></i> Blood Transfusion
+                            </span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
+                            <input type="checkbox" name="services[]" value="oxygen_therapy">
+                            <span style="font-size: 13px;">
+                                <i class="fas fa-lungs"></i> Oxygen Therapy
+                            </span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
+                            <input type="checkbox" name="services[]" value="monitoring">
+                            <span style="font-size: 13px;">
+                                <i class="fas fa-heartbeat"></i> Vital Monitoring
+                            </span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
+                            <input type="checkbox" name="services[]" value="dressing">
+                            <span style="font-size: 13px;">
+                                <i class="fas fa-band-aid"></i> Wound Dressing
+                            </span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
+                            <input type="checkbox" name="services[]" value="catheter">
+                            <span style="font-size: 13px;">
+                                <i class="fas fa-plug"></i> Catheter Insertion
+                            </span>
+                        </label>
                     </div>
                 </div>
 

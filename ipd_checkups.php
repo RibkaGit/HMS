@@ -130,7 +130,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         }
 
         logUserActivity($conn, $_SESSION['user_id'], 'Created IPD Checkup', "Created checkup ID: {$checkupId} for visit ID: {$visitId}");
-        $message = 'Checkup recorded successfully!';
+
+        // Auto-complete all pending doctor orders for this visit
+        $completeOrdersQuery = "UPDATE doctor_orders SET order_status = 'Completed', updated_at = CURRENT_TIMESTAMP
+                                WHERE visit_id = ? AND order_status = 'Pending'";
+        $completeOrdersStmt = $conn->prepare($completeOrdersQuery);
+        if ($completeOrdersStmt) {
+            $completeOrdersStmt->bind_param('i', $visitId);
+            $completeOrdersStmt->execute();
+        }
+
+        $message = 'Checkup recorded successfully! Doctor orders auto-completed.';
         header('Location: ipd_checkups.php?visit_id=' . $visitId . '&message=' . urlencode($message));
         exit();
     } else {
@@ -197,6 +207,113 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_checkup' && isset($_GET['
         echo json_encode(['success' => false, 'error' => 'Checkup not found']);
     }
     exit();
+}
+
+// ============================================================================
+// COMPLETE DOCTOR ORDERS
+// ============================================================================
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'complete_doctor_orders') {
+    $visitId = intval($_POST['visit_id']);
+    $completedOrders = isset($_POST['completed_orders']) ? $_POST['completed_orders'] : [];
+
+    if (!empty($completedOrders)) {
+        foreach ($completedOrders as $orderId) {
+            $orderId = intval($orderId);
+            $updateQuery = "UPDATE doctor_orders SET order_status = 'Completed', updated_at = CURRENT_TIMESTAMP WHERE order_id = ?";
+            $updateStmt = $conn->prepare($updateQuery);
+            $updateStmt->bind_param('i', $orderId);
+            $updateStmt->execute();
+        }
+        logUserActivity($conn, $_SESSION['user_id'], 'Completed Doctor Orders', "Completed " . count($completedOrders) . " orders for visit ID: {$visitId}");
+        $message = 'Doctor orders marked as completed successfully!';
+    } else {
+        $error = 'No orders selected.';
+    }
+}
+
+// ============================================================================
+// CREATE DOCTOR ORDER
+// ============================================================================
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'create_doctor_order') {
+    $visitId = intval($_POST['visit_id']);
+    $patientId = intval($_POST['patient_id']);
+    $doctorId = intval($_SESSION['user_id']);
+    $orderType = sanitizeInput($_POST['order_type']);
+    $orderDescription = sanitizeInput($_POST['order_description']);
+    $priority = sanitizeInput($_POST['priority'] ?? 'Normal');
+    $isOrRequired = isset($_POST['is_or_required']) ? 1 : 0;
+    $assignedNurseId = !empty($_POST['assigned_nurse_id']) ? intval($_POST['assigned_nurse_id']) : null;
+
+    // Ensure doctor_orders table exists
+    $conn->query("CREATE TABLE IF NOT EXISTS doctor_orders (
+        order_id INT AUTO_INCREMENT PRIMARY KEY,
+        visit_id INT NOT NULL,
+        patient_id INT NOT NULL,
+        doctor_id INT NOT NULL,
+        order_type VARCHAR(50) NOT NULL,
+        order_description TEXT,
+        priority VARCHAR(20) DEFAULT 'Normal',
+        is_or_required TINYINT(1) DEFAULT 0,
+        assigned_nurse_id INT DEFAULT NULL,
+        order_status VARCHAR(30) DEFAULT 'Pending',
+        medication_id INT DEFAULT NULL,
+        dosage VARCHAR(100),
+        scheduled_time DATETIME DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )");
+
+    // Ensure nurse_assignments table exists
+    $conn->query("CREATE TABLE IF NOT EXISTS nurse_assignments (
+        assignment_id INT AUTO_INCREMENT PRIMARY KEY,
+        visit_id INT NOT NULL,
+        patient_id INT NOT NULL,
+        nurse_id INT NOT NULL,
+        assigned_by INT NOT NULL,
+        assignment_type VARCHAR(50) DEFAULT 'Checkup',
+        notes TEXT,
+        status VARCHAR(30) DEFAULT 'Assigned',
+        assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP DEFAULT NULL
+    )");
+
+    $medicationId = !empty($_POST['medication_id']) ? intval($_POST['medication_id']) : null;
+    $dosage = sanitizeInput($_POST['dosage'] ?? '');
+    $scheduledTime = !empty($_POST['scheduled_time']) ? sanitizeInput($_POST['scheduled_time']) : null;
+
+    $query = "INSERT INTO doctor_orders (visit_id, patient_id, doctor_id, order_type, order_description, priority, is_or_required, assigned_nurse_id, order_status, medication_id, dosage, scheduled_time)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?, ?, ?)";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param('iiisssiiss', $visitId, $patientId, $doctorId, $orderType, $orderDescription, $priority, $isOrRequired, $assignedNurseId, $medicationId, $dosage, $scheduledTime);
+
+    if ($stmt->execute()) {
+        $orderId = $conn->insert_id;
+
+        // If nurse is assigned, create nurse assignment
+        if ($assignedNurseId) {
+            $assignQuery = "INSERT INTO nurse_assignments (visit_id, patient_id, nurse_id, assigned_by, assignment_type, notes, status)
+                          VALUES (?, ?, ?, ?, 'Doctor Order', ?, 'Assigned')";
+            $assignStmt = $conn->prepare($assignQuery);
+            $assignStmt->bind_param('iiiis', $visitId, $patientId, $assignedNurseId, $doctorId, $orderDescription);
+            $assignStmt->execute();
+        }
+
+        // If OR is required, update visit to OR department
+        if ($isOrRequired) {
+            $orDeptId = 5; // Operation Theater department ID
+            $updateVisit = "UPDATE visits SET department_id = ? WHERE visit_id = ?";
+            $updateStmt = $conn->prepare($updateVisit);
+            $updateStmt->bind_param('ii', $orDeptId, $visitId);
+            $updateStmt->execute();
+        }
+
+        logUserActivity($conn, $_SESSION['user_id'], 'Created Doctor Order', "Order for patient ID: {$patientId}");
+        $message = 'Doctor order created successfully!';
+        header('Location: ipd_checkups.php?visit_id=' . $visitId . '&message=' . urlencode($message));
+        exit();
+    } else {
+        $error = 'Failed to create doctor order.';
+    }
 }
 
 // ============================================================================
@@ -360,6 +477,46 @@ $medications = $conn->query("SELECT medication_id, name, strength, unit, stock_q
 
 // Get materials for dropdown
 $materials = $conn->query("SELECT material_id, name, unit_price, stock_quantity FROM materials WHERE is_active = 1 ORDER BY name ASC")->fetch_all(MYSQLI_ASSOC);
+
+// Get nurses for assignment
+$nurses = $conn->query("SELECT staff_id, CONCAT(first_name, ' ', last_name) as name FROM staff WHERE role_id = 2 AND is_active = 1")->fetch_all(MYSQLI_ASSOC);
+
+// Get pending doctor orders for selected visit
+$doctorOrders = [];
+if ($selectedVisitId > 0) {
+    $ordersQuery = "SELECT do.*, CONCAT(d.first_name, ' ', d.last_name) as doctor_name,
+                   CONCAT(n.first_name, ' ', n.last_name) as nurse_name,
+                   m.name as medication_name, m.strength, m.unit
+                   FROM doctor_orders do
+                   LEFT JOIN staff d ON do.doctor_id = d.staff_id
+                   LEFT JOIN staff n ON do.assigned_nurse_id = n.staff_id
+                   LEFT JOIN medications m ON do.medication_id = m.medication_id
+                   WHERE do.visit_id = ? AND do.order_status = 'Pending'
+                   ORDER BY do.scheduled_time ASC, do.created_at DESC";
+    $ordersStmt = $conn->prepare($ordersQuery);
+    if ($ordersStmt) {
+        $ordersStmt->bind_param('i', $selectedVisitId);
+        $ordersStmt->execute();
+        $doctorOrders = $ordersStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    }
+}
+
+// Get glucose orders specifically
+$glucoseOrders = [];
+if ($selectedVisitId > 0) {
+    $glucoseQuery = "SELECT do.*, CONCAT(d.first_name, ' ', d.last_name) as doctor_name
+                     FROM doctor_orders do
+                     LEFT JOIN staff d ON do.doctor_id = d.staff_id
+                     WHERE do.visit_id = ? AND do.order_type = 'Vital Signs' AND do.order_status = 'Pending'
+                     AND (do.order_description LIKE '%glucose%' OR do.order_description LIKE '%sugar%')
+                     ORDER BY do.scheduled_time ASC, do.created_at DESC";
+    $glucoseStmt = $conn->prepare($glucoseQuery);
+    if ($glucoseStmt) {
+        $glucoseStmt->bind_param('i', $selectedVisitId);
+        $glucoseStmt->execute();
+        $glucoseOrders = $glucoseStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    }
+}
 
 if (isset($_GET['message'])) {
     $message = urldecode($_GET['message']);
@@ -555,6 +712,217 @@ if (isset($_GET['message'])) {
                 </div>
                 <?php endif; ?>
 
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                    <!-- Left Column: Nurse Checkup Form -->
+                    <div class="table-card">
+                        <h2 style="margin-bottom: 20px;"><i class="fas fa-user-nurse"></i> Nurse Checkup</h2>
+                        <form method="POST" action="">
+                            <input type="hidden" name="action" value="create_checkup">
+                            <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
+                            <input type="hidden" name="patient_id" value="<?php echo $selectedPatient['patient_id'] ?? 0; ?>">
+
+                            <div class="form-row">
+                                <div class="form-group" style="flex: 1;">
+                                    <label for="checkup_time">Checkup Time</label>
+                                    <input type="datetime-local" id="checkup_time" name="checkup_time" value="<?php echo date('Y-m-d\TH:i'); ?>" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="progress_notes">Progress Notes</label>
+                                <textarea id="progress_notes" name="progress_notes" rows="4" placeholder="Detailed progress notes, observations, and updates..." style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;"></textarea>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="vital_signs">Vital Signs</label>
+                                <textarea id="vital_signs" name="vital_signs" rows="2" placeholder="e.g., BP: 120/80, Pulse: 72, Temp: 98.6°F, SpO2: 98%" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;"></textarea>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group" style="flex: 1;">
+                                    <label for="glucose_level">Glucose Level</label>
+                                    <input type="number" id="glucose_level" name="glucose_level" step="0.1" placeholder="e.g., 120" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                </div>
+                                <div class="form-group" style="flex: 1;">
+                                    <label for="glucose_unit">Unit</label>
+                                    <select id="glucose_unit" name="glucose_unit" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                        <option value="mg/dL">mg/dL</option>
+                                        <option value="mmol/L">mmol/L</option>
+                                    </select>
+                                </div>
+                                <div class="form-group" style="flex: 1;">
+                                    <label for="glucose_type">Type</label>
+                                    <select id="glucose_type" name="glucose_type" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                        <option value="Random">Random</option>
+                                        <option value="Fasting">Fasting</option>
+                                        <option value="Postprandial">Postprandial</option>
+                                        <option value="HbA1c">HbA1c</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="background: #fef2f2; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
+                                <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                                    <input type="checkbox" name="injection_given" value="1" id="injection_given" onchange="toggleInjectionFields()">
+                                    <strong>Injection Given</strong>
+                                </label>
+                                <div id="injection_fields" style="display: none; margin-top: 12px;">
+                                    <div class="form-row">
+                                        <div class="form-group" style="flex: 1;">
+                                            <label for="injection_type">Injection Type</label>
+                                            <input type="text" id="injection_type" name="injection_type" placeholder="e.g., Insulin, Antibiotic" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                        </div>
+                                        <div class="form-group" style="flex: 1;">
+                                            <label for="injection_dosage">Dosage</label>
+                                            <input type="text" id="injection_dosage" name="injection_dosage" placeholder="e.g., 10 units, 500mg" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="background: #f0fdf4; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
+                                <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                                    <input type="checkbox" name="medicine_given" value="1" id="medicine_given" onchange="toggleMedicineFields()">
+                                    <strong>Medicine Administered</strong>
+                                </label>
+                                <div id="medicine_fields" style="display: none; margin-top: 12px;">
+                                    <div id="medication_container">
+                                        <div class="form-row" style="margin-bottom: 12px;">
+                                            <div class="form-group" style="flex: 2;">
+                                                <label>Medication</label>
+                                                <select name="medications[0][medication_id]" required style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                                    <option value="">Select medication...</option>
+                                                    <?php foreach ($medications as $med): ?>
+                                                        <option value="<?php echo $med['medication_id']; ?>">
+                                                            <?php echo htmlspecialchars($med['name'] . ' ' . $med['strength'] . ' ' . $med['unit']); ?> (Stock: <?php echo $med['stock_quantity']; ?>)
+                                                        </option>
+                                                    <?php endforeach; ?>
+                                                </select>
+                                            </div>
+                                            <div class="form-group" style="flex: 1;">
+                                                <label>Dosage</label>
+                                                <input type="text" name="medications[0][dosage]" placeholder="e.g., 500mg" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                            </div>
+                                            <div class="form-group" style="flex: 1;">
+                                                <label>Quantity</label>
+                                                <input type="number" name="medications[0][quantity]" placeholder="1" min="1" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button type="submit" class="btn-submit" style="width: 100%; padding: 12px 24px;">
+                                <i class="fas fa-save"></i> Save Checkup (Auto-completes Orders)
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- Right Column: Doctor Orders -->
+                    <div class="table-card" style="background: #fef3c7; border: 2px solid #fbbf24;">
+                        <h2 style="margin-bottom: 16px; color: #92400e;"><i class="fas fa-clipboard-list"></i> Doctor Orders (<?php echo count($doctorOrders); ?>)</h2>
+                        <?php if (!empty($doctorOrders)): ?>
+                        <p style="margin-bottom: 16px; color: #92400e; font-size: 14px;">Orders will be auto-completed when you save checkup:</p>
+                        <div style="display: flex; flex-direction: column; gap: 12px; max-height: 600px; overflow-y: auto;">
+                            <?php foreach ($doctorOrders as $order): ?>
+                            <div style="background: white; padding: 16px; border-radius: 8px; border: 1px solid #fcd34d;">
+                                <div style="display: flex; align-items: flex-start; gap: 12px;">
+                                    <div style="width: 24px; height: 24px; border: 2px solid #16a34a; border-radius: 4px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                                        <i class="fas fa-check" style="color: #16a34a; font-size: 14px;"></i>
+                                    </div>
+                                    <div style="flex: 1;">
+                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                            <strong style="color: #1e293b; font-size: 15px;"><?php echo htmlspecialchars($order['order_type']); ?></strong>
+                                            <span style="padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;
+                                                <?php
+                                                if ($order['priority'] === 'High') echo 'background: #fee2e2; color: #dc2626;';
+                                                elseif ($order['priority'] === 'Low') echo 'background: #f1f5f9; color: #64748b;';
+                                                else echo 'background: #dcfce7; color: #166534;';
+                                                ?>">
+                                                <?php echo htmlspecialchars($order['priority']); ?>
+                                            </span>
+                                        </div>
+                                        <p style="margin: 0 0 8px 0; color: #475569; font-size: 14px;"><?php echo htmlspecialchars($order['order_description']); ?></p>
+                                        <?php if ($order['medication_name']): ?>
+                                        <div style="background: #dbeafe; padding: 8px 12px; border-radius: 6px; margin-bottom: 8px;">
+                                            <strong style="color: #1e40af; font-size: 13px;">Medication:</strong>
+                                            <span style="color: #1e40af; font-size: 13px;">
+                                                <?php echo htmlspecialchars($order['medication_name'] . ' ' . $order['strength'] . ' ' . $order['unit']); ?>
+                                                <?php if ($order['dosage']): ?>
+                                                - <?php echo htmlspecialchars($order['dosage']); ?>
+                                                <?php endif; ?>
+                                            </span>
+                                        </div>
+                                        <?php endif; ?>
+                                        <?php if ($order['scheduled_time']): ?>
+                                        <div style="color: #64748b; font-size: 12px;">
+                                            <i class="fas fa-clock"></i> Scheduled: <?php echo date('M d, Y H:i', strtotime($order['scheduled_time'])); ?>
+                                        </div>
+                                        <?php endif; ?>
+                                        <div style="color: #94a3b8; font-size: 12px; margin-top: 4px;">
+                                            <i class="fas fa-user-md"></i> Dr. <?php echo htmlspecialchars($order['doctor_name']); ?>
+                                            <?php if ($order['nurse_name']): ?>
+                                            | <i class="fas fa-user-nurse"></i> Assigned: <?php echo htmlspecialchars($order['nurse_name']); ?>
+                                            <?php endif; ?>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <?php else: ?>
+                        <p style="color: #92400e; font-size: 14px;">No pending doctor orders for this patient.</p>
+                        <?php endif; ?>
+                    </div>
+                </div>
+
+                <?php if (!empty($glucoseOrders)): ?>
+                <div class="table-card" style="margin-bottom: 20px; background: #fefce8; border: 2px solid #fde68a;">
+                    <h2 style="margin-bottom: 16px; color: #92400e;"><i class="fas fa-tint"></i> Glucose Monitoring Orders (<?php echo count($glucoseOrders); ?>)</h2>
+                    <p style="margin-bottom: 16px; color: #92400e; font-size: 14px;">Doctor has ordered glucose monitoring for this patient:</p>
+                    <form method="POST" action="">
+                        <input type="hidden" name="action" value="complete_doctor_orders">
+                        <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
+                        <div style="display: flex; flex-direction: column; gap: 12px;">
+                            <?php foreach ($glucoseOrders as $order): ?>
+                            <div style="background: white; padding: 16px; border-radius: 8px; border: 1px solid #fde68a;">
+                                <label style="display: flex; align-items: flex-start; gap: 12px; cursor: pointer;">
+                                    <input type="checkbox" name="completed_orders[]" value="<?php echo $order['order_id']; ?>" style="width: 20px; height: 20px; margin-top: 2px;">
+                                    <div style="flex: 1;">
+                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                            <strong style="color: #1e293b; font-size: 15px;"><i class="fas fa-tint" style="color: #f59e0b;"></i> Glucose Check</strong>
+                                            <span style="padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;
+                                                <?php
+                                                if ($order['priority'] === 'High') echo 'background: #fee2e2; color: #dc2626;';
+                                                elseif ($order['priority'] === 'Low') echo 'background: #f1f5f9; color: #64748b;';
+                                                else echo 'background: #dcfce7; color: #166534;';
+                                                ?>">
+                                                <?php echo htmlspecialchars($order['priority']); ?>
+                                            </span>
+                                        </div>
+                                        <p style="margin: 0 0 8px 0; color: #475569; font-size: 14px;"><?php echo htmlspecialchars($order['order_description']); ?></p>
+                                        <?php if ($order['scheduled_time']): ?>
+                                        <div style="color: #64748b; font-size: 12px;">
+                                            <i class="fas fa-clock"></i> Scheduled: <?php echo date('M d, Y H:i', strtotime($order['scheduled_time'])); ?>
+                                        </div>
+                                        <?php endif; ?>
+                                        <div style="color: #94a3b8; font-size: 12px; margin-top: 4px;">
+                                            <i class="fas fa-user-md"></i> Dr. <?php echo htmlspecialchars($order['doctor_name']); ?>
+                                        </div>
+                                    </div>
+                                </label>
+                            </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <div style="margin-top: 16px;">
+                            <button type="submit" class="btn-submit" style="background: #f59e0b; padding: 12px 24px;">
+                                <i class="fas fa-check-circle"></i> Mark Glucose Orders as Completed
+                            </button>
+                        </div>
+                    </form>
+                </div>
+                <?php endif; ?>
+
                 <div class="table-card">
                     <h2 style="margin-bottom: 20px;">New Checkup</h2>
                     <form method="POST" action="">
@@ -714,6 +1082,73 @@ if (isset($_GET['message'])) {
                                 <i class="fas fa-save"></i> Save Checkup
                             </button>
                             <button type="button" class="btn-cancel" onclick="window.location.href='ipd_checkups.php?visit_id=<?php echo $selectedVisitId; ?>'">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Doctor Orders Section -->
+                <div class="table-card" style="margin-top: 20px;">
+                    <h2 style="margin-bottom: 20px;">Doctor Orders</h2>
+                    <form method="POST" action="">
+                        <input type="hidden" name="action" value="create_doctor_order">
+                        <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
+                        <input type="hidden" name="patient_id" value="<?php echo $selectedPatient['patient_id'] ?? 0; ?>">
+
+                        <div class="form-row">
+                            <div class="form-group" style="flex: 1;">
+                                <label for="order_type">Order Type *</label>
+                                <select id="order_type" name="order_type" required style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                    <option value="">Select Type</option>
+                                    <option value="Checkup">Checkup</option>
+                                    <option value="Medication">Medication</option>
+                                    <option value="Lab Test">Lab Test</option>
+                                    <option value="Radiology">Radiology</option>
+                                    <option value="Vital Signs">Vital Signs</option>
+                                    <option value="Procedure">Procedure</option>
+                                    <option value="Other">Other</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="flex: 1;">
+                                <label for="priority">Priority</label>
+                                <select id="priority" name="priority" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                    <option value="Normal">Normal</option>
+                                    <option value="High">High</option>
+                                    <option value="Low">Low</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="order_description">Order Description *</label>
+                            <textarea id="order_description" name="order_description" rows="3" required placeholder="Detailed description of the order..." style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;"></textarea>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group" style="flex: 1;">
+                                <label for="assigned_nurse_id">Assign Nurse</label>
+                                <select id="assigned_nurse_id" name="assigned_nurse_id" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                    <option value="">Select Nurse (Optional)</option>
+                                    <?php foreach ($nurses as $nurse): ?>
+                                        <option value="<?php echo $nurse['staff_id']; ?>">
+                                            <?php echo htmlspecialchars($nurse['name']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="background: #fef3c7; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
+                            <label style="display: flex; align-items: center; gap: 8px;">
+                                <input type="checkbox" name="is_or_required" value="1" id="is_or_required">
+                                <strong>Send to Operation Room (OR)</strong>
+                            </label>
+                            <small style="color: #92400e; margin-left: 24px;">Check this box if the patient needs to be transferred to the Operation Theater</small>
+                        </div>
+
+                        <div class="btn-group">
+                            <button type="submit" class="btn-submit" style="background: #7c3aed;">
+                                <i class="fas fa-clipboard-list"></i> Create Doctor Order
+                            </button>
                         </div>
                     </form>
                 </div>

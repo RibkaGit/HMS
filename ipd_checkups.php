@@ -158,16 +158,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
         logUserActivity($conn, $_SESSION['user_id'], 'Created IPD Checkup', "Created checkup ID: {$checkupId} for visit ID: {$visitId}");
 
-        // Auto-complete all pending doctor orders for this visit
-        $completeOrdersQuery = "UPDATE doctor_orders SET order_status = 'Completed', updated_at = CURRENT_TIMESTAMP
-                                WHERE visit_id = ? AND order_status = 'Pending'";
-        $completeOrdersStmt = $conn->prepare($completeOrdersQuery);
-        if ($completeOrdersStmt) {
-            $completeOrdersStmt->bind_param('i', $visitId);
-            $completeOrdersStmt->execute();
+        // Auto-complete selected doctor orders for this visit
+        $completedCount = 0;
+        if (isset($_POST['completed_orders']) && is_array($_POST['completed_orders'])) {
+            foreach ($_POST['completed_orders'] as $orderId) {
+                $orderId = intval($orderId);
+                $completeOrdersQuery = "UPDATE doctor_orders SET order_status = 'Completed', updated_at = CURRENT_TIMESTAMP
+                                        WHERE order_id = ? AND visit_id = ?";
+                $completeOrdersStmt = $conn->prepare($completeOrdersQuery);
+                if ($completeOrdersStmt) {
+                    $completeOrdersStmt->bind_param('ii', $orderId, $visitId);
+                    $completeOrdersStmt->execute();
+                    $completedCount++;
+                }
+            }
         }
 
-        $message = 'Checkup recorded successfully! Doctor orders auto-completed.';
+        $message = 'Checkup recorded successfully!';
+        if ($completedCount > 0) {
+            $message .= ' ' . $completedCount . ' doctor order(s) marked as completed.';
+        }
         header('Location: ipd_checkups.php?visit_id=' . $visitId . '&message=' . urlencode($message));
         exit();
     } else {
@@ -508,7 +518,7 @@ $materials = $conn->query("SELECT material_id, name, unit_price, stock_quantity 
 // Get nurses for assignment
 $nurses = $conn->query("SELECT staff_id, CONCAT(first_name, ' ', last_name) as name FROM staff WHERE role_id = 2 AND is_active = 1")->fetch_all(MYSQLI_ASSOC);
 
-// Get pending doctor orders for selected visit
+// Get doctor orders for selected visit (both pending and completed)
 $doctorOrders = [];
 if ($selectedVisitId > 0) {
     $ordersQuery = "SELECT do.*, CONCAT(d.first_name, ' ', d.last_name) as doctor_name,
@@ -518,13 +528,24 @@ if ($selectedVisitId > 0) {
                    LEFT JOIN staff d ON do.doctor_id = d.staff_id
                    LEFT JOIN staff n ON do.assigned_nurse_id = n.staff_id
                    LEFT JOIN medications m ON do.medication_id = m.medication_id
-                   WHERE do.visit_id = ? AND do.order_status = 'Pending'
-                   ORDER BY do.scheduled_time ASC, do.created_at DESC";
+                   WHERE do.visit_id = ?
+                   ORDER BY CASE WHEN do.order_status = 'Pending' THEN 0 ELSE 1 END, do.scheduled_time ASC, do.created_at DESC";
     $ordersStmt = $conn->prepare($ordersQuery);
     if ($ordersStmt) {
         $ordersStmt->bind_param('i', $selectedVisitId);
         $ordersStmt->execute();
         $doctorOrders = $ordersStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    }
+}
+
+// Split orders into pending and completed
+$pendingOrders = [];
+$completedOrders = [];
+foreach ($doctorOrders as $order) {
+    if ($order['order_status'] === 'Completed') {
+        $completedOrders[] = $order;
+    } else {
+        $pendingOrders[] = $order;
     }
 }
 
@@ -625,10 +646,30 @@ if (isset($_GET['message'])) {
         .medicine-item:last-child {
             border-bottom: none;
         }
-        /* Force two-column layout for checkup page */
-        @media (min-width: 768px) {
-            .checkup-two-column {
-                grid-template-columns: 1fr 1fr !important;
+        
+        /* Custom Styles for Interactive Doctor Orders */
+        .order-card {
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .order-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        }
+        .selected-order {
+            border: 2px solid #10b981 !important;
+            background-color: #f0fdf4 !important;
+        }
+        .toast-notification {
+            animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
             }
         }
     </style>
@@ -745,225 +786,299 @@ if (isset($_GET['message'])) {
                 </div>
                 <?php endif; ?>
 
-                <div style="display: flex !important; flex-direction: row !important; gap: 20px !important; width: 100% !important; align-items: stretch !important; flex-wrap: nowrap !important; position: relative !important;">
-                    <!-- Left Column: Nurse Checkup Form -->
-                    <div class="table-card" style="flex: 0 0 calc(50% - 10px) !important; min-width: 0 !important; box-sizing: border-box !important; width: calc(50% - 10px) !important; max-width: calc(50% - 10px) !important;">
-                        <h2 style="margin-bottom: 20px;"><i class="fas fa-user-nurse"></i> Nurse Checkup</h2>
-                        <form method="POST" action="">
-                            <input type="hidden" name="action" value="create_checkup">
-                            <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
-                            <input type="hidden" name="patient_id" value="<?php echo $selectedPatient['patient_id'] ?? 0; ?>">
+                <form method="POST" action="">
+                    <input type="hidden" name="action" value="create_checkup">
+                    <input type="hidden" name="visit_id" value="<?php echo $selectedVisitId; ?>">
+                    <input type="hidden" name="patient_id" value="<?php echo $selectedPatient['patient_id'] ?? 0; ?>">
 
-                            <div class="form-row">
-                                <div class="form-group" style="flex: 1;">
-                                    <label for="checkup_time">Checkup Time</label>
-                                    <input type="datetime-local" id="checkup_time" name="checkup_time" value="<?php echo date('Y-m-d\TH:i'); ?>" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; box-sizing: border-box;">
-                                </div>
-                            </div>
+                    <div class="checkup-layout-container" style="display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap;">
+                        <!-- Left Column: Nurse Checkup Form -->
+                        <div style="flex: 1.2; min-width: 320px;">
+                            <div class="table-card" style="margin-bottom: 0;">
+                                <h2 style="margin-bottom: 20px;"><i class="fas fa-user-nurse"></i> Nurse Checkup</h2>
 
-                            <div class="form-group">
-                                <label for="progress_notes">Progress Notes</label>
-                                <textarea id="progress_notes" name="progress_notes" rows="4" placeholder="Detailed progress notes, observations, and updates..." style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; box-sizing: border-box;"></textarea>
-                            </div>
-
-                            <div class="form-group">
-                                <label for="vital_signs">Vital Signs</label>
-                                <textarea id="vital_signs" name="vital_signs" rows="2" placeholder="e.g., BP: 120/80, Pulse: 72, Temp: 98.6°F, SpO2: 98%" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; box-sizing: border-box;"></textarea>
-                            </div>
-
-                            <div class="form-row">
-                                <div class="form-group" style="flex: 1;">
-                                    <label for="glucose_level">Glucose Level</label>
-                                    <input type="number" id="glucose_level" name="glucose_level" step="0.1" placeholder="e.g., 120" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; box-sizing: border-box;">
-                                </div>
-                                <div class="form-group" style="flex: 1;">
-                                    <label for="glucose_unit">Unit</label>
-                                    <select id="glucose_unit" name="glucose_unit" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; box-sizing: border-box;">
-                                        <option value="mg/dL">mg/dL</option>
-                                        <option value="mmol/L">mmol/L</option>
-                                    </select>
-                                </div>
-                                <div class="form-group" style="flex: 1;">
-                                    <label for="glucose_type">Type</label>
-                                    <select id="glucose_type" name="glucose_type" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; box-sizing: border-box;">
-                                        <option value="Random">Random</option>
-                                        <option value="Fasting">Fasting</option>
-                                        <option value="Postprandial">Postprandial</option>
-                                        <option value="HbA1c">HbA1c</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            <div class="form-group" style="background: #dbeafe; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
-                                <label style="display: block; font-weight: 600; color: #1e40af; margin-bottom: 12px;">
-                                    <i class="fas fa-concierge-bell"></i> Services Provided
-                                </label>
-                                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px;">
-                                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px; background: white; border-radius: 4px; border: 1px solid #e2e8f0;">
-                                        <input type="checkbox" name="services[]" value="anesthesia">
-                                        <span style="font-size: 12px;">
-                                            <i class="fas fa-syringe"></i> Anesthesia
-                                        </span>
-                                    </label>
-                                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px; background: white; border-radius: 4px; border: 1px solid #e2e8f0;">
-                                        <input type="checkbox" name="services[]" value="injection">
-                                        <span style="font-size: 12px;">
-                                            <i class="fas fa-syringe"></i> Injection
-                                        </span>
-                                    </label>
-                                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px; background: white; border-radius: 4px; border: 1px solid #e2e8f0;">
-                                        <input type="checkbox" name="services[]" value="iv_fluids">
-                                        <span style="font-size: 12px;">
-                                            <i class="fas fa-tint"></i> IV Fluids
-                                        </span>
-                                    </label>
-                                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px; background: white; border-radius: 4px; border: 1px solid #e2e8f0;">
-                                        <input type="checkbox" name="services[]" value="blood_transfusion">
-                                        <span style="font-size: 12px;">
-                                            <i class="fas fa-heart"></i> Blood Transfusion
-                                        </span>
-                                    </label>
-                                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px; background: white; border-radius: 4px; border: 1px solid #e2e8f0;">
-                                        <input type="checkbox" name="services[]" value="oxygen_therapy">
-                                        <span style="font-size: 12px;">
-                                            <i class="fas fa-lungs"></i> Oxygen Therapy
-                                        </span>
-                                    </label>
-                                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px; background: white; border-radius: 4px; border: 1px solid #e2e8f0;">
-                                        <input type="checkbox" name="services[]" value="monitoring">
-                                        <span style="font-size: 12px;">
-                                            <i class="fas fa-heartbeat"></i> Vital Monitoring
-                                        </span>
-                                    </label>
-                                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px; background: white; border-radius: 4px; border: 1px solid #e2e8f0;">
-                                        <input type="checkbox" name="services[]" value="dressing">
-                                        <span style="font-size: 12px;">
-                                            <i class="fas fa-band-aid"></i> Wound Dressing
-                                        </span>
-                                    </label>
-                                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px; background: white; border-radius: 4px; border: 1px solid #e2e8f0;">
-                                        <input type="checkbox" name="services[]" value="catheter">
-                                        <span style="font-size: 12px;">
-                                            <i class="fas fa-plug"></i> Catheter
-                                        </span>
-                                    </label>
-                                </div>
-                            </div>
-
-                            <div class="form-group" style="background: #fef2f2; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
-                                <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-                                    <input type="checkbox" name="injection_given" value="1" id="injection_given" onchange="toggleInjectionFields()">
-                                    <strong>Injection Given</strong>
-                                </label>
-                                <div id="injection_fields" style="display: none; margin-top: 12px;">
-                                    <div class="form-row">
-                                        <div class="form-group" style="flex: 1;">
-                                            <label for="injection_type">Injection Type</label>
-                                            <input type="text" id="injection_type" name="injection_type" placeholder="e.g., Insulin, Antibiotic" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
-                                        </div>
-                                        <div class="form-group" style="flex: 1;">
-                                            <label for="injection_dosage">Dosage</label>
-                                            <input type="text" id="injection_dosage" name="injection_dosage" placeholder="e.g., 10 units, 500mg" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
-                                        </div>
+                                <div class="form-row">
+                                    <div class="form-group" style="flex: 1;">
+                                        <label for="checkup_time">Checkup Time</label>
+                                        <input type="datetime-local" id="checkup_time" name="checkup_time" value="<?php echo date('Y-m-d\TH:i'); ?>" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; box-sizing: border-box;">
                                     </div>
                                 </div>
-                            </div>
 
-                            <div class="form-group" style="background: #f0fdf4; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
-                                <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-                                    <input type="checkbox" name="medicine_given" value="1" id="medicine_given" onchange="toggleMedicineFields()">
-                                    <strong>Medicine Administered</strong>
-                                </label>
-                                <div id="medicine_fields" style="display: none; margin-top: 12px;">
-                                    <div id="medication_container">
-                                        <div class="form-row" style="margin-bottom: 12px;">
-                                            <div class="form-group" style="flex: 2;">
-                                                <label>Medication</label>
-                                                <select name="medications[0][medication_id]" required style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
-                                                    <option value="">Select medication...</option>
-                                                    <?php foreach ($medications as $med): ?>
-                                                        <option value="<?php echo $med['medication_id']; ?>">
-                                                            <?php echo htmlspecialchars($med['name'] . ' ' . $med['strength'] . ' ' . $med['unit']); ?> (Stock: <?php echo $med['stock_quantity']; ?>)
-                                                        </option>
-                                                    <?php endforeach; ?>
-                                                </select>
+                                <div class="form-group">
+                                    <label for="progress_notes">Progress Notes</label>
+                                    <textarea id="progress_notes" name="progress_notes" rows="4" placeholder="Detailed progress notes, observations, and updates..." style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; box-sizing: border-box;"></textarea>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="vital_signs">Vital Signs</label>
+                                    <textarea id="vital_signs" name="vital_signs" rows="2" placeholder="e.g., BP: 120/80, Pulse: 72, Temp: 98.6°F, SpO2: 98%" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; box-sizing: border-box;"></textarea>
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="form-group" style="flex: 1;">
+                                        <label for="glucose_level">Glucose Level</label>
+                                        <input type="number" id="glucose_level" name="glucose_level" step="0.1" placeholder="e.g., 120" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; box-sizing: border-box;">
+                                    </div>
+                                    <div class="form-group" style="flex: 1;">
+                                        <label for="glucose_unit">Unit</label>
+                                        <select id="glucose_unit" name="glucose_unit" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; box-sizing: border-box;">
+                                            <option value="mg/dL">mg/dL</option>
+                                            <option value="mmol/L">mmol/L</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group" style="flex: 1;">
+                                        <label for="glucose_type">Type</label>
+                                        <select id="glucose_type" name="glucose_type" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; box-sizing: border-box;">
+                                            <option value="Random">Random</option>
+                                            <option value="Fasting">Fasting</option>
+                                            <option value="Postprandial">Postprandial</option>
+                                            <option value="HbA1c">HbA1c</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="form-group" style="background: #dbeafe; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
+                                    <label style="display: block; font-weight: 600; color: #1e40af; margin-bottom: 12px;">
+                                        <i class="fas fa-concierge-bell"></i> Services Provided
+                                    </label>
+                                    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px;">
+                                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px; background: white; border-radius: 4px; border: 1px solid #e2e8f0;">
+                                            <input type="checkbox" name="services[]" value="anesthesia">
+                                            <span style="font-size: 12px;">
+                                                <i class="fas fa-syringe"></i> Anesthesia
+                                            </span>
+                                        </label>
+                                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px; background: white; border-radius: 4px; border: 1px solid #e2e8f0;">
+                                            <input type="checkbox" name="services[]" value="injection">
+                                            <span style="font-size: 12px;">
+                                                <i class="fas fa-syringe"></i> Injection
+                                            </span>
+                                        </label>
+                                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px; background: white; border-radius: 4px; border: 1px solid #e2e8f0;">
+                                            <input type="checkbox" name="services[]" value="iv_fluids">
+                                            <span style="font-size: 12px;">
+                                                <i class="fas fa-tint"></i> IV Fluids
+                                            </span>
+                                        </label>
+                                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px; background: white; border-radius: 4px; border: 1px solid #e2e8f0;">
+                                            <input type="checkbox" name="services[]" value="blood_transfusion">
+                                            <span style="font-size: 12px;">
+                                                <i class="fas fa-heart"></i> Blood Transfusion
+                                            </span>
+                                        </label>
+                                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px; background: white; border-radius: 4px; border: 1px solid #e2e8f0;">
+                                            <input type="checkbox" name="services[]" value="oxygen_therapy">
+                                            <span style="font-size: 12px;">
+                                                <i class="fas fa-lungs"></i> Oxygen Therapy
+                                            </span>
+                                        </label>
+                                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px; background: white; border-radius: 4px; border: 1px solid #e2e8f0;">
+                                            <input type="checkbox" name="services[]" value="monitoring">
+                                            <span style="font-size: 12px;">
+                                                <i class="fas fa-heartbeat"></i> Vital Monitoring
+                                            </span>
+                                        </label>
+                                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px; background: white; border-radius: 4px; border: 1px solid #e2e8f0;">
+                                            <input type="checkbox" name="services[]" value="dressing">
+                                            <span style="font-size: 12px;">
+                                                <i class="fas fa-band-aid"></i> Wound Dressing
+                                            </span>
+                                        </label>
+                                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px; background: white; border-radius: 4px; border: 1px solid #e2e8f0;">
+                                            <input type="checkbox" name="services[]" value="catheter">
+                                            <span style="font-size: 12px;">
+                                                <i class="fas fa-plug"></i> Catheter
+                                            </span>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="form-group" style="background: #fef2f2; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
+                                    <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                                        <input type="checkbox" name="injection_given" value="1" id="injection_given" onchange="toggleInjectionFields()">
+                                        <strong>Injection Given</strong>
+                                    </label>
+                                    <div id="injection_fields" style="display: none; margin-top: 12px;">
+                                        <div class="form-row">
+                                            <div class="form-group" style="flex: 1;">
+                                                <label for="injection_type">Injection Type</label>
+                                                <input type="text" id="injection_type" name="injection_type" placeholder="e.g., Insulin, Antibiotic" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
                                             </div>
                                             <div class="form-group" style="flex: 1;">
-                                                <label>Dosage</label>
-                                                <input type="text" name="medications[0][dosage]" placeholder="e.g., 500mg" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
-                                            </div>
-                                            <div class="form-group" style="flex: 1;">
-                                                <label>Quantity</label>
-                                                <input type="number" name="medications[0][quantity]" placeholder="1" min="1" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                                <label for="injection_dosage">Dosage</label>
+                                                <input type="text" id="injection_dosage" name="injection_dosage" placeholder="e.g., 10 units, 500mg" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
                                             </div>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
 
-                            <button type="submit" class="btn-submit" style="width: 100%; padding: 12px 24px;">
-                                <i class="fas fa-save"></i> Save Checkup (Auto-completes Orders)
-                            </button>
-                        </form>
-                    </div>
-
-                    <!-- Right Column: Doctor Orders -->
-                    <div class="table-card" style="flex: 0 0 calc(50% - 10px) !important; min-width: 0 !important; box-sizing: border-box !important; width: calc(50% - 10px) !important; max-width: calc(50% - 10px) !important; background: #fef3c7; border: 2px solid #fbbf24;">
-                        <h2 style="margin-bottom: 16px; color: #92400e;"><i class="fas fa-clipboard-list"></i> Doctor Orders (<?php echo count($doctorOrders); ?>)</h2>
-                        <?php if (!empty($doctorOrders)): ?>
-                        <p style="margin-bottom: 16px; color: #92400e; font-size: 14px;">Orders will be auto-completed when you save checkup:</p>
-                        <div style="display: flex; flex-direction: column; gap: 12px; max-height: 600px; overflow-y: auto;">
-                            <?php foreach ($doctorOrders as $order): ?>
-                            <div style="background: white; padding: 16px; border-radius: 8px; border: 1px solid #fcd34d;">
-                                <div style="display: flex; align-items: flex-start; gap: 12px;">
-                                    <div style="width: 24px; height: 24px; border: 2px solid #16a34a; border-radius: 4px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                                        <i class="fas fa-check" style="color: #16a34a; font-size: 14px;"></i>
-                                    </div>
-                                    <div style="flex: 1;">
-                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                                            <strong style="color: #1e293b; font-size: 15px;"><?php echo htmlspecialchars($order['order_type']); ?></strong>
-                                            <span style="padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;
-                                                <?php
-                                                if ($order['priority'] === 'High') echo 'background: #fee2e2; color: #dc2626;';
-                                                elseif ($order['priority'] === 'Low') echo 'background: #f1f5f9; color: #64748b;';
-                                                else echo 'background: #dcfce7; color: #166534;';
-                                                ?>">
-                                                <?php echo htmlspecialchars($order['priority']); ?>
-                                            </span>
-                                        </div>
-                                        <p style="margin: 0 0 8px 0; color: #475569; font-size: 14px;"><?php echo htmlspecialchars($order['order_description']); ?></p>
-                                        <?php if ($order['medication_name']): ?>
-                                        <div style="background: #dbeafe; padding: 8px 12px; border-radius: 6px; margin-bottom: 8px;">
-                                            <strong style="color: #1e40af; font-size: 13px;">Medication:</strong>
-                                            <span style="color: #1e40af; font-size: 13px;">
-                                                <?php echo htmlspecialchars($order['medication_name'] . ' ' . $order['strength'] . ' ' . $order['unit']); ?>
-                                                <?php if ($order['dosage']): ?>
-                                                - <?php echo htmlspecialchars($order['dosage']); ?>
-                                                <?php endif; ?>
-                                            </span>
-                                        </div>
-                                        <?php endif; ?>
-                                        <?php if ($order['scheduled_time']): ?>
-                                        <div style="color: #64748b; font-size: 12px;">
-                                            <i class="fas fa-clock"></i> Scheduled: <?php echo date('M d, Y H:i', strtotime($order['scheduled_time'])); ?>
-                                        </div>
-                                        <?php endif; ?>
-                                        <div style="color: #94a3b8; font-size: 12px; margin-top: 4px;">
-                                            <i class="fas fa-user-md"></i> Dr. <?php echo htmlspecialchars($order['doctor_name']); ?>
-                                            <?php if ($order['nurse_name']): ?>
-                                            | <i class="fas fa-user-nurse"></i> Assigned: <?php echo htmlspecialchars($order['nurse_name']); ?>
-                                            <?php endif; ?>
+                                <div class="form-group" style="background: #f0fdf4; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
+                                    <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                                        <input type="checkbox" name="medicine_given" value="1" id="medicine_given" onchange="toggleMedicineFields()">
+                                        <strong>Medicine Administered</strong>
+                                    </label>
+                                    <div id="medicine_fields" style="display: none; margin-top: 12px;">
+                                        <div id="medication_container">
+                                            <div class="form-row" style="margin-bottom: 12px;">
+                                                <div class="form-group" style="flex: 2;">
+                                                    <label>Medication</label>
+                                                    <select name="medications[0][medication_id]" required style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                                        <option value="">Select medication...</option>
+                                                        <?php foreach ($medications as $med): ?>
+                                                            <option value="<?php echo $med['medication_id']; ?>">
+                                                                <?php echo htmlspecialchars($med['name'] . ' ' . $med['strength'] . ' ' . $med['unit']); ?> (Stock: <?php echo $med['stock_quantity']; ?>)
+                                                            </option>
+                                                        <?php endforeach; ?>
+                                                    </select>
+                                                </div>
+                                                <div class="form-group" style="flex: 1;">
+                                                    <label>Dosage</label>
+                                                    <input type="text" name="medications[0][dosage]" placeholder="e.g., 500mg" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                                </div>
+                                                <div class="form-group" style="flex: 1;">
+                                                    <label>Quantity</label>
+                                                    <input type="number" name="medications[0][quantity]" placeholder="1" min="1" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
+
+                                <button type="submit" class="btn-submit" style="width: 100%; padding: 12px 24px;">
+                                    <i class="fas fa-save"></i> Save Checkup & Update Orders
+                                </button>
                             </div>
-                            <?php endforeach; ?>
                         </div>
-                        <?php else: ?>
-                        <p style="color: #92400e; font-size: 14px;">No pending doctor orders for this patient.</p>
-                        <?php endif; ?>
+
+                        <!-- Right Column: Doctor Orders & Auto-Completion -->
+                        <div style="flex: 0.8; min-width: 320px;">
+                            <div class="table-card" style="background: #fffbeb; border: 1px solid #fef3c7; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+                                <h2 style="margin-bottom: 16px; color: #b45309; display: flex; align-items: center; gap: 8px;">
+                                    <i class="fas fa-clipboard-list"></i> Doctor Orders (<?php echo count($doctorOrders); ?>)
+                                </h2>
+                                
+                                <!-- Pending Doctor Orders -->
+                                <div style="margin-bottom: 24px;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                        <h3 style="margin: 0; font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; color: #b45309; font-weight: 700;">
+                                            Pending Orders (<?php echo count($pendingOrders); ?>)
+                                        </h3>
+                                        <?php if (!empty($pendingOrders)): ?>
+                                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: #b45309; font-weight: 600; background: #fef3c7; padding: 4px 8px; border-radius: 6px; border: 1px solid #fbd38d;">
+                                            <input type="checkbox" id="select_all_pending" onchange="toggleSelectAllPending(this)" style="cursor: pointer;">
+                                            Select All
+                                        </label>
+                                        <?php endif; ?>
+                                    </div>
+                                    
+                                    <?php if (!empty($pendingOrders)): ?>
+                                    <div style="display: flex; flex-direction: column; gap: 12px; max-height: 400px; overflow-y: auto; padding-right: 4px;">
+                                        <?php foreach ($pendingOrders as $order): ?>
+                                        <div id="order_item_<?php echo $order['order_id']; ?>" class="order-card pending-card" style="background: white; padding: 14px; border-radius: 8px; border: 1px solid #fef3c7; box-shadow: 0 1px 3px rgba(0,0,0,0.02); transition: all 0.25s ease;">
+                                            <div style="display: flex; align-items: flex-start; gap: 12px;">
+                                                <input type="checkbox" name="completed_orders[]" value="<?php echo $order['order_id']; ?>" id="order_check_<?php echo $order['order_id']; ?>" class="pending-order-checkbox" style="width: 18px; height: 18px; margin-top: 2px; cursor: pointer;" onchange="handleOrderCheckboxChange(<?php echo $order['order_id']; ?>, this.checked)">
+                                                <div style="flex: 1;">
+                                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 8px;">
+                                                        <strong style="color: #1e293b; font-size: 14px;"><?php echo htmlspecialchars($order['order_type']); ?></strong>
+                                                        <span style="padding: 2px 6px; border-radius: 10px; font-size: 10px; font-weight: 600;
+                                                            <?php
+                                                            if ($order['priority'] === 'High') echo 'background: #fee2e2; color: #dc2626;';
+                                                            elseif ($order['priority'] === 'Low') echo 'background: #f1f5f9; color: #64748b;';
+                                                            else echo 'background: #dcfce7; color: #166534;';
+                                                            ?>">
+                                                            <?php echo htmlspecialchars($order['priority']); ?>
+                                                        </span>
+                                                    </div>
+                                                    <p style="margin: 0 0 6px 0; color: #475569; font-size: 13px; line-height: 1.4;"><?php echo htmlspecialchars($order['order_description']); ?></p>
+                                                    
+                                                    <?php if ($order['medication_name']): ?>
+                                                    <div style="background: #eff6ff; border-left: 3px solid #3b82f6; padding: 6px 10px; border-radius: 4px; margin-bottom: 6px;">
+                                                        <strong style="color: #1e40af; font-size: 12px;">Medication:</strong>
+                                                        <span style="color: #1e40af; font-size: 12px;">
+                                                            <?php echo htmlspecialchars($order['medication_name'] . ' ' . $order['strength'] . ' ' . $order['unit']); ?>
+                                                            <?php if ($order['dosage']): ?>
+                                                            - <?php echo htmlspecialchars($order['dosage']); ?>
+                                                            <?php endif; ?>
+                                                        </span>
+                                                    </div>
+                                                    <?php endif; ?>
+                                                    
+                                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; flex-wrap: wrap; gap: 6px;">
+                                                        <div style="color: #94a3b8; font-size: 11px; display: flex; align-items: center; gap: 4px;">
+                                                            <i class="fas fa-user-md"></i> <span>Dr. <?php echo htmlspecialchars($order['doctor_name']); ?></span>
+                                                        </div>
+                                                        <button type="button" class="btn-apply-order" onclick='applyDoctorOrder(<?php echo htmlspecialchars(json_encode($order), ENT_QUOTES, "UTF-8"); ?>)' style="background: #3b82f6; color: white; border: none; padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px; font-weight: 600; transition: all 0.2s;">
+                                                            <i class="fas fa-wand-magic-sparkles"></i> Apply to Form
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                    <?php else: ?>
+                                    <div style="text-align: center; background: white; border: 1px solid #fef3c7; color: #b45309; padding: 20px; border-radius: 8px;">
+                                        <i class="fas fa-check-circle" style="font-size: 24px; display: block; margin-bottom: 6px; opacity: 0.6;"></i>
+                                        <p style="margin: 0; font-size: 13px;">No pending doctor orders.</p>
+                                    </div>
+                                    <?php endif; ?>
+                                </div>
+                                
+                                <!-- Completed Doctor Orders -->
+                                <div>
+                                    <h3 style="margin-bottom: 12px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; color: #166534; font-weight: 700;">
+                                        Completed Orders (<?php echo count($completedOrders); ?>)
+                                    </h3>
+                                    
+                                    <?php if (!empty($completedOrders)): ?>
+                                    <div style="display: flex; flex-direction: column; gap: 12px; max-height: 300px; overflow-y: auto; padding-right: 4px;">
+                                        <?php foreach ($completedOrders as $order): ?>
+                                        <div class="order-card completed-card" style="background: #f0fdf4; padding: 14px; border-radius: 8px; border: 1px solid #bbf7d0; opacity: 0.9; position: relative;">
+                                            <div style="display: flex; align-items: flex-start; gap: 12px;">
+                                                <div style="color: #16a34a; font-size: 18px; margin-top: 1px;" title="Completed checkup (right tick)" class="right-tick-icon">
+                                                    <i class="fas fa-check-circle"></i>
+                                                </div>
+                                                <div style="flex: 1;">
+                                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 8px;">
+                                                        <strong style="color: #14532d; font-size: 14px; text-decoration: line-through; opacity: 0.8;"><?php echo htmlspecialchars($order['order_type']); ?></strong>
+                                                        <span style="background: #dcfce7; color: #166534; padding: 2px 6px; border-radius: 10px; font-size: 9px; font-weight: 700; display: inline-flex; align-items: center; gap: 3px;">
+                                                            <i class="fas fa-check"></i> Completed
+                                                        </span>
+                                                    </div>
+                                                    <p style="margin: 0 0 6px 0; color: #14532d; font-size: 13px; text-decoration: line-through; opacity: 0.7; line-height: 1.4;"><?php echo htmlspecialchars($order['order_description']); ?></p>
+                                                    
+                                                    <?php if ($order['medication_name']): ?>
+                                                    <div style="background: #e6fbf1; border-left: 3px solid #16a34a; padding: 6px 10px; border-radius: 4px; margin-bottom: 6px; opacity: 0.7;">
+                                                        <strong style="color: #14532d; font-size: 12px;">Medication:</strong>
+                                                        <span style="color: #14532d; font-size: 12px;">
+                                                            <?php echo htmlspecialchars($order['medication_name'] . ' ' . $order['strength'] . ' ' . $order['unit']); ?>
+                                                        </span>
+                                                    </div>
+                                                    <?php endif; ?>
+                                                    
+                                                    <div style="color: #84a98c; font-size: 11px; display: flex; align-items: center; gap: 4px; opacity: 0.8;">
+                                                        <i class="fas fa-user-md"></i> <span>Dr. <?php echo htmlspecialchars($order['doctor_name']); ?></span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                    <?php else: ?>
+                                    <div style="text-align: center; border: 1px dashed #cbd5e1; color: #94a3b8; padding: 20px; border-radius: 8px;">
+                                        <p style="margin: 0; font-size: 13px;">No completed orders yet.</p>
+                                    </div>
+                                    <?php endif; ?>
+                                </div>
+                                
+                            </div>
+                        </div>
                     </div>
                 </div>
+            </form>
+            
+            <!-- Toast Notifications Container -->
+            <div id="toast-container" style="position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 10px;"></div>
 
                 <!-- Checkup History Section -->
                 <div class="table-card" style="margin-top: 20px;">
@@ -981,7 +1096,7 @@ if (isset($_GET['message'])) {
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php if (empty($checkupHistory)): ?>
+                                <?php if (empty($checkups)): ?>
                                     <tr>
                                         <td colspan="6" style="text-align: center; color: #94a3b8; padding: 40px;">
                                             <i class="fas fa-clipboard-list" style="font-size: 32px; display: block; margin-bottom: 8px;"></i>
@@ -989,7 +1104,7 @@ if (isset($_GET['message'])) {
                                         </td>
                                     </tr>
                                 <?php else: ?>
-                                    <?php foreach ($checkupHistory as $checkup): ?>
+                                    <?php foreach ($checkups as $checkup): ?>
                                     <tr>
                                         <td><?php echo date('M d, Y H:i', strtotime($checkup['checkup_time'])); ?></td>
                                         <td><?php echo htmlspecialchars(substr($checkup['progress_notes'] ?? '', 0, 100)) . (strlen($checkup['progress_notes'] ?? '') > 100 ? '...' : ''); ?></td>
@@ -1014,6 +1129,7 @@ if (isset($_GET['message'])) {
                         </table>
                     </div>
                 </div>
+                <?php endif; ?>
             </div>
         </div>
     </div>
@@ -1022,13 +1138,172 @@ if (isset($_GET['message'])) {
         function toggleInjectionFields() {
             const checkbox = document.getElementById('injection_given');
             const fields = document.getElementById('injection_fields');
-            fields.style.display = checkbox.checked ? 'block' : 'none';
+            if (checkbox && fields) {
+                fields.style.display = checkbox.checked ? 'block' : 'none';
+            }
         }
 
         function toggleMedicineFields() {
             const checkbox = document.getElementById('medicine_given');
             const fields = document.getElementById('medicine_fields');
-            fields.style.display = checkbox.checked ? 'block' : 'none';
+            if (checkbox && fields) {
+                fields.style.display = checkbox.checked ? 'block' : 'none';
+            }
+        }
+
+        function handleOrderCheckboxChange(orderId, checked) {
+            const item = document.getElementById('order_item_' + orderId);
+            if (item) {
+                if (checked) {
+                    item.classList.add('selected-order');
+                } else {
+                    item.classList.remove('selected-order');
+                }
+            }
+        }
+
+        function toggleSelectAllPending(master) {
+            const checkboxes = document.querySelectorAll('.pending-order-checkbox');
+            checkboxes.forEach(cb => {
+                cb.checked = master.checked;
+                const orderId = cb.value;
+                handleOrderCheckboxChange(orderId, master.checked);
+            });
+            showToast(master.checked ? 'Selected all pending orders' : 'Deselected all pending orders', 'info');
+        }
+
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            if (!container) return;
+            
+            const toast = document.createElement('div');
+            toast.className = 'toast-notification';
+            
+            let bgColor = '#10b981'; // success (green)
+            let icon = 'fa-check-circle';
+            if (type === 'error') {
+                bgColor = '#ef4444'; // error (red)
+                icon = 'fa-exclamation-circle';
+            } else if (type === 'info') {
+                bgColor = '#3b82f6'; // info (blue)
+                icon = 'fa-info-circle';
+            }
+            
+            toast.style.background = bgColor;
+            toast.style.color = 'white';
+            toast.style.padding = '12px 24px';
+            toast.style.borderRadius = '8px';
+            toast.style.boxShadow = '0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05)';
+            toast.style.fontSize = '13px';
+            toast.style.fontWeight = '600';
+            toast.style.display = 'flex';
+            toast.style.alignItems = 'center';
+            toast.style.gap = '8px';
+            toast.style.marginBottom = '8px';
+            toast.style.minWidth = '250px';
+            
+            toast.innerHTML = `<i class="fas ${icon}"></i> <span>${message}</span>`;
+            container.appendChild(toast);
+            
+            // Remove after 3.5 seconds
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(10px)';
+                toast.style.transition = 'all 0.3s ease';
+                setTimeout(() => {
+                    toast.remove();
+                }, 300);
+            }, 3500);
+        }
+
+        function applyDoctorOrder(order) {
+            // 1. Check the checkbox for this order to mark it completed on save
+            const checkbox = document.getElementById('order_check_' + order.order_id);
+            if (checkbox) {
+                checkbox.checked = true;
+                handleOrderCheckboxChange(order.order_id, true);
+            }
+
+            // 2. Populate form fields
+            let logMsg = '';
+            
+            if (order.order_type === 'Medication' && order.medication_id) {
+                // Check "Medicine Administered"
+                const medGivenCheckbox = document.getElementById('medicine_given');
+                if (medGivenCheckbox) {
+                    medGivenCheckbox.checked = true;
+                    toggleMedicineFields();
+                }
+                
+                // Select the medication
+                const medSelect = document.querySelector('select[name="medications[0][medication_id]"]');
+                if (medSelect) {
+                    medSelect.value = order.medication_id;
+                }
+                
+                // Set dosage
+                const dosageInput = document.querySelector('input[name="medications[0][dosage]"]');
+                if (dosageInput && order.dosage) {
+                    dosageInput.value = order.dosage;
+                }
+                
+                // Set quantity
+                const qtyInput = document.querySelector('input[name="medications[0][quantity]"]');
+                if (qtyInput) {
+                    qtyInput.value = '1';
+                }
+                logMsg = `Medication: ${order.medication_name || 'Selected medicine'} (${order.dosage || 'No dosage specified'})`;
+            } 
+            else if (order.order_type === 'Injection') {
+                // Check "Injection Given"
+                const injGivenCheckbox = document.getElementById('injection_given');
+                if (injGivenCheckbox) {
+                    injGivenCheckbox.checked = true;
+                    toggleInjectionFields();
+                }
+                
+                // Set type
+                const injTypeInput = document.getElementById('injection_type');
+                if (injTypeInput) {
+                    injTypeInput.value = order.medication_name || order.order_description || '';
+                }
+                
+                // Set dosage
+                const injDosageInput = document.getElementById('injection_dosage');
+                if (injDosageInput && order.dosage) {
+                    injDosageInput.value = order.dosage;
+                }
+                logMsg = `Injection: ${injTypeInput ? injTypeInput.value : ''} (${order.dosage || ''})`;
+            } 
+            else if (order.order_type === 'Vital Signs') {
+                // Set vital signs
+                const vitalInput = document.getElementById('vital_signs');
+                if (vitalInput) {
+                    if (vitalInput.value) {
+                        if (!vitalInput.value.includes(order.order_description)) {
+                            vitalInput.value += ', ' + order.order_description;
+                        }
+                    } else {
+                        vitalInput.value = order.order_description;
+                    }
+                }
+                logMsg = `Vitals request applied`;
+            }
+
+            // Append to Progress Notes
+            const notesInput = document.getElementById('progress_notes');
+            if (notesInput) {
+                const noteText = `Performing Doctor Order [${order.order_type}]: ${order.order_description}`;
+                if (notesInput.value) {
+                    if (!notesInput.value.includes(noteText)) {
+                        notesInput.value += "\n" + noteText;
+                    }
+                } else {
+                    notesInput.value = noteText;
+                }
+            }
+
+            showToast(`Applied Order: ${order.order_type}`, 'success');
         }
     </script>
 </body>

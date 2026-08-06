@@ -908,7 +908,7 @@ if (isset($_GET['message'])) {
                     </div>
 
                     <!-- Right Column: Doctor Orders -->
-                    <div class="table-card" style="flex: 1 !important; min-width: 0 !important; box-sizing: border-box !important; background: #fef3c7; border: 2px solid #fbbf24;">
+                    <div class="table-card" style="flex: 0 0 calc(50% - 10px) !important; min-width: 0 !important; box-sizing: border-box !important; width: calc(50% - 10px) !important; max-width: calc(50% - 10px) !important; background: #fef3c7; border: 2px solid #fbbf24;">
                         <h2 style="margin-bottom: 16px; color: #92400e;"><i class="fas fa-clipboard-list"></i> Doctor Orders (<?php echo count($doctorOrders); ?>)</h2>
                         <?php if (!empty($doctorOrders)): ?>
                         <p style="margin-bottom: 16px; color: #92400e; font-size: 14px;">Orders will be auto-completed when you save checkup:</p>

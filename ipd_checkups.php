@@ -745,9 +745,9 @@ if (isset($_GET['message'])) {
                 </div>
                 <?php endif; ?>
 
-                <div class="checkup-two-column" style="display: flex !important; flex-direction: row !important; gap: 20px !important; width: 100% !important; align-items: stretch !important;">
+                <div style="display: flex !important; flex-direction: row !important; gap: 20px !important; width: 100% !important; align-items: stretch !important; flex-wrap: nowrap !important; position: relative !important;">
                     <!-- Left Column: Nurse Checkup Form -->
-                    <div class="table-card" style="flex: 1 !important; min-width: 0 !important; box-sizing: border-box !important;">
+                    <div class="table-card" style="flex: 0 0 calc(50% - 10px) !important; min-width: 0 !important; box-sizing: border-box !important; width: calc(50% - 10px) !important; max-width: calc(50% - 10px) !important;">
                         <h2 style="margin-bottom: 20px;"><i class="fas fa-user-nurse"></i> Nurse Checkup</h2>
                         <form method="POST" action="">
                             <input type="hidden" name="action" value="create_checkup">

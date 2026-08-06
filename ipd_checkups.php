@@ -745,9 +745,9 @@ if (isset($_GET['message'])) {
                 </div>
                 <?php endif; ?>
 
-                <div style="display: flex; flex-direction: row; gap: 20px; width: 100%; align-items: stretch;">
+                <div class="checkup-two-column" style="display: flex !important; flex-direction: row !important; gap: 20px !important; width: 100% !important; align-items: stretch !important;">
                     <!-- Left Column: Nurse Checkup Form -->
-                    <div class="table-card" style="flex: 1; min-width: 0; box-sizing: border-box;">
+                    <div class="table-card" style="flex: 1 !important; min-width: 0 !important; box-sizing: border-box !important;">
                         <h2 style="margin-bottom: 20px;"><i class="fas fa-user-nurse"></i> Nurse Checkup</h2>
                         <form method="POST" action="">
                             <input type="hidden" name="action" value="create_checkup">
@@ -908,7 +908,7 @@ if (isset($_GET['message'])) {
                     </div>
 
                     <!-- Right Column: Doctor Orders -->
-                    <div class="table-card" style="flex: 1; min-width: 0; box-sizing: border-box; background: #fef3c7; border: 2px solid #fbbf24;">
+                    <div class="table-card" style="flex: 1 !important; min-width: 0 !important; box-sizing: border-box !important; background: #fef3c7; border: 2px solid #fbbf24;">
                         <h2 style="margin-bottom: 16px; color: #92400e;"><i class="fas fa-clipboard-list"></i> Doctor Orders (<?php echo count($doctorOrders); ?>)</h2>
                         <?php if (!empty($doctorOrders)): ?>
                         <p style="margin-bottom: 16px; color: #92400e; font-size: 14px;">Orders will be auto-completed when you save checkup:</p>

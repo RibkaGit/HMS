@@ -472,30 +472,31 @@ body {
 
 /* Force two-column layout for checkup page */
 .checkup-two-column {
-    display: grid !important;
-    grid-template-columns: 1fr 1fr !important;
+    display: flex !important;
+    flex-direction: row !important;
     gap: 20px !important;
     width: 100% !important;
+    align-items: stretch !important;
 }
 
 .checkup-two-column .table-card {
-    width: 100% !important;
-    box-sizing: border-box !important;
+    flex: 1 !important;
     min-width: 0 !important;
+    box-sizing: border-box !important;
 }
 
 /* Ensure two-column layout on screens above 768px */
 @media (min-width: 769px) {
     .checkup-two-column {
-        display: grid !important;
-        grid-template-columns: 1fr 1fr !important;
+        display: flex !important;
+        flex-direction: row !important;
     }
 }
 
 /* Stack on mobile */
 @media (max-width: 768px) {
     .checkup-two-column {
-        grid-template-columns: 1fr !important;
+        flex-direction: column !important;
     }
 }
 

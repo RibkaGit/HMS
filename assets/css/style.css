@@ -470,6 +470,35 @@ body {
     box-shadow: var(--shadow-sm);
 }
 
+/* Force two-column layout for checkup page */
+.checkup-two-column {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 20px !important;
+    width: 100% !important;
+}
+
+.checkup-two-column .table-card {
+    width: 100% !important;
+    box-sizing: border-box !important;
+    min-width: 0 !important;
+}
+
+/* Ensure two-column layout on screens above 768px */
+@media (min-width: 769px) {
+    .checkup-two-column {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+    }
+}
+
+/* Stack on mobile */
+@media (max-width: 768px) {
+    .checkup-two-column {
+        grid-template-columns: 1fr !important;
+    }
+}
+
 .card-header {
     display: flex;
     justify-content: space-between;

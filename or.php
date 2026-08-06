@@ -796,14 +796,9 @@ if (isset($_GET['message'])) {
                                         </td>
                                         <td><?php echo date('M d, Y H:i', strtotime($patient['admitted_at'])); ?></td>
                                         <td>
-                                            <div style="display: flex; gap: 8px;">
-                                                <button class="btn-create" onclick="openProcedureModal(<?php echo $patient['visit_id']; ?>, '<?php echo htmlspecialchars($patient['first_name'] . ' ' . $patient['last_name']); ?>')">
-                                                    <i class="fas fa-calendar-plus"></i> Schedule Procedure
-                                                </button>
-                                                <button class="btn-create" onclick="openMaterialPlanModal(<?php echo $patient['visit_id']; ?>, '<?php echo htmlspecialchars($patient['first_name'] . ' ' . $patient['last_name']); ?>')" style="background: #8b5cf6;">
-                                                    <i class="fas fa-boxes"></i> Plan Materials
-                                                </button>
-                                            </div>
+                                            <button class="btn-create" onclick="openProcedureModal(<?php echo $patient['visit_id']; ?>, '<?php echo htmlspecialchars($patient['first_name'] . ' ' . $patient['last_name']); ?>')">
+                                                <i class="fas fa-calendar-plus"></i> Schedule Procedure & Plan Materials
+                                            </button>
                                         </td>
                                     </tr>
                                     <?php endforeach; ?>
@@ -1181,191 +1176,201 @@ if (isset($_GET['message'])) {
 
     <!-- Schedule Procedure Modal -->
     <div class="form-modal" id="procedureModal">
-        <div class="form-modal-content">
+        <div class="form-modal-content" style="max-width: 900px;">
             <button class="close-btn" onclick="closeProcedureModal()">&times;</button>
-            <h2 style="margin-bottom: 24px;">Schedule Procedure</h2>
-            <form method="POST" action="">
-                <input type="hidden" name="action" value="schedule_procedure">
-                <input type="hidden" id="proc_visit_id" name="visit_id">
-                
-                <div class="form-group">
-                    <label>Patient</label>
-                    <input type="text" id="proc_patient_name" readonly style="background: #f1f5f9;">
-                </div>
+            <h2 style="margin-bottom: 24px;">Schedule Procedure & Plan Materials</h2>
+            
+            <!-- Tabs -->
+            <div style="display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 2px solid #e2e8f0;">
+                <button type="button" onclick="switchTab('procedure')" id="tab-procedure" class="tab-btn active" style="flex: 1; padding: 12px 16px; background: #3b82f6; color: white; border: none; border-radius: 8px 8px 0 0; cursor: pointer; font-weight: 600;">
+                    <i class="fas fa-calendar-plus"></i> Procedure Details
+                </button>
+                <button type="button" onclick="switchTab('materials')" id="tab-materials" class="tab-btn" style="flex: 1; padding: 12px 16px; background: #f1f5f9; color: #64748b; border: none; border-radius: 8px 8px 0 0; cursor: pointer; font-weight: 600;">
+                    <i class="fas fa-boxes"></i> Material Planning
+                </button>
+            </div>
 
-                <div class="form-group">
-                    <label for="procedure_name">Procedure Name *</label>
-                    <input type="text" id="procedure_name" name="procedure_name" required placeholder="e.g., Appendectomy">
-                </div>
-                
-                <div class="form-group">
-                    <label for="scheduled_date">Scheduled Date *</label>
-                    <input type="datetime-local" id="scheduled_date" name="scheduled_date" required>
-                </div>
-
-                <div class="form-group">
-                    <label for="or_room_id">Operation Room *</label>
-                    <select id="or_room_id" name="or_room_id" required>
-                        <option value="">Select OR Room</option>
-                        <?php foreach ($orRooms as $room): ?>
-                            <option value="<?php echo $room['or_room_id']; ?>">
-                                <?php echo htmlspecialchars($room['room_number'] . ' - ' . ($room['room_name'] ?? $room['room_type'])); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label for="surgeon_id">Surgeon *</label>
-                    <select id="surgeon_id" name="surgeon_id" required>
-                        <option value="">Select Surgeon</option>
-                        <?php foreach ($doctors as $doctor): ?>
-                            <option value="<?php echo $doctor['staff_id']; ?>">
-                                <?php echo htmlspecialchars($doctor['name']); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label for="assistant_id">Assistant Surgeon</label>
-                    <select id="assistant_id" name="assistant_id">
-                        <option value="">Select Assistant (Optional)</option>
-                        <?php foreach ($doctors as $doctor): ?>
-                            <option value="<?php echo $doctor['staff_id']; ?>">
-                                <?php echo htmlspecialchars($doctor['name']); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label for="anesthesiologist_id">Anesthesiologist</label>
-                    <select id="anesthesiologist_id" name="anesthesiologist_id">
-                        <option value="">Select Anesthesiologist (Optional)</option>
-                        <?php foreach ($doctors as $doctor): ?>
-                            <option value="<?php echo $doctor['staff_id']; ?>">
-                                <?php echo htmlspecialchars($doctor['name']); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label for="notes">Notes</label>
-                    <textarea id="notes" name="notes" rows="3"></textarea>
-                </div>
-                
-                <div class="btn-group" style="display: flex; gap: 12px; margin-top: 24px;">
-                    <button type="submit" class="btn-submit">
-                        <i class="fas fa-calendar-plus"></i> Schedule Procedure
-                    </button>
-                    <button type="button" class="btn-cancel" onclick="closeProcedureModal()" style="flex: 1; padding: 12px; background: #64748b; color: white; border: none; border-radius: 8px; cursor: pointer;">Cancel</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Material Plan Modal -->
-    <div class="form-modal" id="materialPlanModal">
-        <div class="form-modal-content" style="max-width: 800px;">
-            <button class="close-btn" onclick="closeMaterialPlanModal()">&times;</button>
-            <h2 style="margin-bottom: 24px;">Plan Materials for OR Operation</h2>
-            <form method="POST" action="">
-                <input type="hidden" name="action" value="create_material_plan">
-                <input type="hidden" id="plan_visit_id" name="visit_id">
-                <input type="hidden" id="plan_patient_id" name="patient_id">
-
-                <div class="form-group">
-                    <label>Patient</label>
-                    <input type="text" id="plan_patient_name" readonly style="background: #f1f5f9;">
-                </div>
-
-                <div class="form-group" style="background: #f0fdf4; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
-                    <label style="display: block; font-weight: 600; color: #166534; margin-bottom: 12px;">
-                        <i class="fas fa-boxes"></i> Select Materials
-                    </label>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px;">
-                        <?php foreach ($materials as $mat): ?>
-                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
-                            <input type="checkbox" name="materials[]" value="<?php echo $mat['material_id']; ?>">
-                            <span style="font-size: 13px;">
-                                <?php echo htmlspecialchars($mat['name']); ?>
-                                <small style="color: #64748b;">(Stock: <?php echo $mat['stock_quantity']; ?>)</small>
-                            </span>
-                        </label>
-                        <?php endforeach; ?>
+            <!-- Procedure Details Tab -->
+            <div id="content-procedure" class="tab-content">
+                <form method="POST" action="" id="procedureForm">
+                    <input type="hidden" name="action" value="schedule_procedure">
+                    <input type="hidden" id="proc_visit_id" name="visit_id">
+                    
+                    <div class="form-group">
+                        <label>Patient</label>
+                        <input type="text" id="proc_patient_name" readonly style="background: #f1f5f9;">
                     </div>
-                </div>
 
-                <div class="form-group" style="background: #dbeafe; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
-                    <label style="display: block; font-weight: 600; color: #1e40af; margin-bottom: 12px;">
-                        <i class="fas fa-concierge-bell"></i> Select Services
-                    </label>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px;">
-                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
-                            <input type="checkbox" name="services[]" value="anesthesia">
-                            <span style="font-size: 13px;">
-                                <i class="fas fa-syringe"></i> Anesthesia (Pain Killer)
-                            </span>
-                        </label>
-                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
-                            <input type="checkbox" name="services[]" value="injection">
-                            <span style="font-size: 13px;">
-                                <i class="fas fa-syringe"></i> Injection Administration
-                            </span>
-                        </label>
-                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
-                            <input type="checkbox" name="services[]" value="iv_fluids">
-                            <span style="font-size: 13px;">
-                                <i class="fas fa-tint"></i> IV Fluids
-                            </span>
-                        </label>
-                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
-                            <input type="checkbox" name="services[]" value="blood_transfusion">
-                            <span style="font-size: 13px;">
-                                <i class="fas fa-heart"></i> Blood Transfusion
-                            </span>
-                        </label>
-                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
-                            <input type="checkbox" name="services[]" value="oxygen_therapy">
-                            <span style="font-size: 13px;">
-                                <i class="fas fa-lungs"></i> Oxygen Therapy
-                            </span>
-                        </label>
-                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
-                            <input type="checkbox" name="services[]" value="monitoring">
-                            <span style="font-size: 13px;">
-                                <i class="fas fa-heartbeat"></i> Vital Monitoring
-                            </span>
-                        </label>
-                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
-                            <input type="checkbox" name="services[]" value="dressing">
-                            <span style="font-size: 13px;">
-                                <i class="fas fa-band-aid"></i> Wound Dressing
-                            </span>
-                        </label>
-                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
-                            <input type="checkbox" name="services[]" value="catheter">
-                            <span style="font-size: 13px;">
-                                <i class="fas fa-plug"></i> Catheter Insertion
-                            </span>
-                        </label>
+                    <div class="form-group">
+                        <label for="procedure_name">Procedure Name *</label>
+                        <input type="text" id="procedure_name" name="procedure_name" required placeholder="e.g., Appendectomy">
                     </div>
-                </div>
+                    
+                    <div class="form-group">
+                        <label for="scheduled_date">Scheduled Date *</label>
+                        <input type="datetime-local" id="scheduled_date" name="scheduled_date" required>
+                    </div>
 
-                <div class="form-group">
-                    <label for="plan_notes">Notes</label>
-                    <textarea id="plan_notes" name="notes" rows="3" placeholder="Additional notes about the material plan..."></textarea>
-                </div>
+                    <div class="form-group">
+                        <label for="or_room_id">Operation Room *</label>
+                        <select id="or_room_id" name="or_room_id" required>
+                            <option value="">Select OR Room</option>
+                            <?php foreach ($orRooms as $room): ?>
+                                <option value="<?php echo $room['or_room_id']; ?>">
+                                    <?php echo htmlspecialchars($room['room_number'] . ' - ' . ($room['room_name'] ?? $room['room_type'])); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
 
-                <div class="btn-group" style="display: flex; gap: 12px; margin-top: 24px;">
-                    <button type="submit" class="btn-submit" style="background: #8b5cf6;">
-                        <i class="fas fa-save"></i> Create Material Plan
-                    </button>
-                    <button type="button" class="btn-cancel" onclick="closeMaterialPlanModal()">Cancel</button>
-                </div>
-            </form>
+                    <div class="form-group">
+                        <label for="surgeon_id">Surgeon *</label>
+                        <select id="surgeon_id" name="surgeon_id" required>
+                            <option value="">Select Surgeon</option>
+                            <?php foreach ($doctors as $doctor): ?>
+                                <option value="<?php echo $doctor['staff_id']; ?>">
+                                    <?php echo htmlspecialchars($doctor['name']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="assistant_id">Assistant Surgeon</label>
+                        <select id="assistant_id" name="assistant_id">
+                            <option value="">Select Assistant (Optional)</option>
+                            <?php foreach ($doctors as $doctor): ?>
+                                <option value="<?php echo $doctor['staff_id']; ?>">
+                                    <?php echo htmlspecialchars($doctor['name']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="anesthesiologist_id">Anesthesiologist</label>
+                        <select id="anesthesiologist_id" name="anesthesiologist_id">
+                            <option value="">Select Anesthesiologist (Optional)</option>
+                            <?php foreach ($doctors as $doctor): ?>
+                                <option value="<?php echo $doctor['staff_id']; ?>">
+                                    <?php echo htmlspecialchars($doctor['name']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="notes">Notes</label>
+                        <textarea id="notes" name="notes" rows="3"></textarea>
+                    </div>
+                    
+                    <div class="btn-group" style="display: flex; gap: 12px; margin-top: 24px;">
+                        <button type="submit" class="btn-submit">
+                            <i class="fas fa-calendar-plus"></i> Schedule Procedure
+                        </button>
+                        <button type="button" class="btn-cancel" onclick="closeProcedureModal()" style="flex: 1; padding: 12px; background: #64748b; color: white; border: none; border-radius: 8px; cursor: pointer;">Cancel</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Material Planning Tab -->
+            <div id="content-materials" class="tab-content" style="display: none;">
+                <form method="POST" action="" id="materialForm">
+                    <input type="hidden" name="action" value="create_material_plan">
+                    <input type="hidden" id="plan_visit_id" name="visit_id">
+                    <input type="hidden" id="plan_patient_id" name="patient_id">
+
+                    <div class="form-group">
+                        <label>Patient</label>
+                        <input type="text" id="plan_patient_name" readonly style="background: #f1f5f9;">
+                    </div>
+
+                    <div class="form-group" style="background: #f0fdf4; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+                        <label style="display: block; font-weight: 600; color: #166534; margin-bottom: 12px;">
+                            <i class="fas fa-boxes"></i> Select Materials
+                        </label>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px;">
+                            <?php foreach ($materials as $mat): ?>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
+                                <input type="checkbox" name="materials[]" value="<?php echo $mat['material_id']; ?>">
+                                <span style="font-size: 13px;">
+                                    <?php echo htmlspecialchars($mat['name']); ?>
+                                    <small style="color: #64748b;">(Stock: <?php echo $mat['stock_quantity']; ?>)</small>
+                                </span>
+                            </label>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="background: #dbeafe; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+                        <label style="display: block; font-weight: 600; color: #1e40af; margin-bottom: 12px;">
+                            <i class="fas fa-concierge-bell"></i> Select Services
+                        </label>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px;">
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
+                                <input type="checkbox" name="services[]" value="anesthesia">
+                                <span style="font-size: 13px;">
+                                    <i class="fas fa-syringe"></i> Anesthesia (Pain Killer)
+                                </span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
+                                <input type="checkbox" name="services[]" value="injection">
+                                <span style="font-size: 13px;">
+                                    <i class="fas fa-syringe"></i> Injection Administration
+                                </span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
+                                <input type="checkbox" name="services[]" value="iv_fluids">
+                                <span style="font-size: 13px;">
+                                    <i class="fas fa-tint"></i> IV Fluids
+                                </span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
+                                <input type="checkbox" name="services[]" value="blood_transfusion">
+                                <span style="font-size: 13px;">
+                                    <i class="fas fa-heart"></i> Blood Transfusion
+                                </span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
+                                <input type="checkbox" name="services[]" value="oxygen_therapy">
+                                <span style="font-size: 13px;">
+                                    <i class="fas fa-lungs"></i> Oxygen Therapy
+                                </span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
+                                <input type="checkbox" name="services[]" value="monitoring">
+                                <span style="font-size: 13px;">
+                                    <i class="fas fa-heartbeat"></i> Vital Monitoring
+                                </span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
+                                <input type="checkbox" name="services[]" value="dressing">
+                                <span style="font-size: 13px;">
+                                    <i class="fas fa-band-aid"></i> Wound Dressing
+                                </span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
+                                <input type="checkbox" name="services[]" value="catheter">
+                                <span style="font-size: 13px;">
+                                    <i class="fas fa-plug"></i> Catheter Insertion
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="plan_notes">Notes</label>
+                        <textarea id="plan_notes" name="notes" rows="3" placeholder="Additional notes about the material plan..."></textarea>
+                    </div>
+
+                    <div class="btn-group" style="display: flex; gap: 12px; margin-top: 24px;">
+                        <button type="submit" class="btn-submit" style="background: #8b5cf6;">
+                            <i class="fas fa-boxes"></i> Save Material Plan
+                        </button>
+                        <button type="button" class="btn-cancel" onclick="closeProcedureModal()" style="flex: 1; padding: 12px; background: #64748b; color: white; border: none; border-radius: 8px; cursor: pointer;">Cancel</button>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
 
@@ -1384,6 +1389,27 @@ if (isset($_GET['message'])) {
         document.getElementById('menuToggle').addEventListener('click', function() {
             document.querySelector('.sidebar').classList.toggle('collapsed');
         });
+
+        // Tab Switching Function
+        function switchTab(tabName) {
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.style.display = 'none';
+            });
+            
+            // Remove active class from all tabs
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.style.background = '#f1f5f9';
+                btn.style.color = '#64748b';
+            });
+            
+            // Show selected tab content
+            document.getElementById('content-' + tabName).style.display = 'block';
+            
+            // Add active class to selected tab
+            document.getElementById('tab-' + tabName).style.background = '#3b82f6';
+            document.getElementById('tab-' + tabName).style.color = 'white';
+        }
 
         // OR Room Modal Functions
         function openCreateRoomModal() {
@@ -1430,22 +1456,16 @@ if (isset($_GET['message'])) {
         function openProcedureModal(visitId, patientName) {
             document.getElementById('proc_visit_id').value = visitId;
             document.getElementById('proc_patient_name').value = patientName;
+            // Also populate material planning tab
+            document.getElementById('plan_visit_id').value = visitId;
+            document.getElementById('plan_patient_name').value = patientName;
+            // Reset to first tab
+            switchTab('procedure');
             document.getElementById('procedureModal').style.display = 'flex';
         }
 
         function closeProcedureModal() {
             document.getElementById('procedureModal').style.display = 'none';
-        }
-
-        // Material Plan Modal Functions
-        function openMaterialPlanModal(visitId, patientName) {
-            document.getElementById('plan_visit_id').value = visitId;
-            document.getElementById('plan_patient_name').value = patientName;
-            document.getElementById('materialPlanModal').style.display = 'flex';
-        }
-
-        function closeMaterialPlanModal() {
-            document.getElementById('materialPlanModal').style.display = 'none';
         }
 
         // View Material Plan Modal Functions
